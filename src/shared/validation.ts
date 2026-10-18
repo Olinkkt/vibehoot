@@ -1,0 +1,26 @@
+export const NICKNAME_MAX_LENGTH = 20;
+export const PIN_LENGTH = 4;
+
+export const JOIN_ERRORS = {
+  unknownPin: "No room found for that PIN.",
+  emptyNickname: "Enter a nickname.",
+  nicknameTooLong: "Nickname must be 20 characters or fewer.",
+  duplicateNickname: "That nickname is already taken.",
+  invalidRequest: "Invalid join request.",
+} as const;
+
+const CONTROL_CHARS = /[\u0000-\u001F\u007F]/g;
+const PIN_PATTERN = /^\d{4}$/;
+
+export function normalizeNickname(value: string): string {
+  return value.normalize("NFKC").replace(CONTROL_CHARS, "").trim();
+}
+
+export function nicknameLength(value: string): number {
+  return Array.from(value).length;
+}
+
+export function normalizePin(value: string): string | null {
+  const pin = value.trim();
+  return PIN_PATTERN.test(pin) ? pin : null;
+}
