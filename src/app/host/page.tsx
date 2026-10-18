@@ -40,6 +40,7 @@ export default function HostPage() {
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const lobbyRef = useRef<LobbyState | null>(null);
+  const hostingRef = useRef(false);
 
   useEffect(() => {
     lobbyRef.current = lobby;
@@ -51,6 +52,7 @@ export default function HostPage() {
     }
 
     const onDisconnect = () => {
+      hostingRef.current = false;
       setCreating(false);
       if (lobbyRef.current) {
         setNotice("The connection dropped and the room was closed.");
@@ -59,6 +61,9 @@ export default function HostPage() {
     };
 
     const onLobbyUpdate = (state: LobbyUpdate) => {
+      if (!hostingRef.current) {
+        return;
+      }
       setCreating(false);
       setNotice(null);
       setLobby({ pin: state.pin, players: state.players });
@@ -80,6 +85,7 @@ export default function HostPage() {
 
     setNotice(null);
     setCreating(true);
+    hostingRef.current = true;
     socket.emit("host:create");
   }, [socket]);
 
