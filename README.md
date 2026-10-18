@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Slophoot
 
-## Getting Started
+Self-hosted Kahoot-style quiz. This milestone is the lobby: a host creates a room, players join with a PIN and nickname, and the host sees the list update live. Starting the game is not implemented yet. Room state lives in memory and is cleared when the server restarts.
 
-First, run the development server:
+## Run in development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`npm run dev` runs `tsx watch server.ts`, which serves Next.js and Socket.io on the same HTTP server.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Host: [http://localhost:3000/host](http://localhost:3000/host)
+- Players: [http://localhost:3000](http://localhost:3000)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Production
 
-## Learn More
+```bash
+npm run build
+npm start
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Folder structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `server.ts` — HTTP server, Next.js request handler, and Socket.io
+- `src/server/rooms.ts` — in-memory rooms, PIN generation, and join rules
+- `src/server/socket.ts` — host, player, and disconnect events
+- `src/shared/events.ts` — shared Socket.io event types
+- `src/lib/socket.ts` — typed Socket.io client hook
+- `src/app/page.tsx` — player join page
+- `src/app/host/page.tsx` — host lobby
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Room rules are covered by `npm test`.
