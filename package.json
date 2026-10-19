@@ -29,8 +29,5 @@
     "eslint-config-next": "16.4.2",
     "tailwindcss": "^4",
     "typescript": "^5"
-  },
-  "overrides": {
-    "braces": "npm:@pezkuwi/braces@3.0.4"
   }
 }
