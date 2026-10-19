@@ -47,6 +47,23 @@ export default function HostPage() {
   }, [lobby]);
 
   useEffect(() => {
+    if (!lobby) {
+      return;
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Current browsers show a generic prompt and ignore custom copy.
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [lobby]);
+
+  useEffect(() => {
     if (!socket) {
       return;
     }
