@@ -1,5 +1,6 @@
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import {
+  HOST_ERRORS,
   JOIN_ERRORS,
   NICKNAME_MAX_LENGTH,
   PIN_LENGTH,
@@ -37,11 +38,21 @@ export type JoinResult = JoinSuccess | JoinFailure;
 export type DisconnectResult =
   | { type: "none" }
   | { type: "player_left"; room: Room }
-  | { type: "room_closed"; pin: string };
+  | { type: "room_closed"; pin: string }
+  | { type: "host_away"; pin: string; reservationSocketId: string };
+
+export type ResumeResult =
+  | { ok: true; room: Room; token: string }
+  | { ok: false; message: string };
 
 type Membership =
   | { role: "host"; pin: string }
   | { role: "player"; pin: string };
+
+type StoredRoom = Room & {
+  hostToken: string;
+  hostAway: boolean;
+};
 
 const PIN_ATTEMPTS = 50;
 const PIN_SPACE = 10_000;
@@ -49,9 +60,12 @@ const PIN_SPACE = 10_000;
 export const NO_FREE_PIN_MESSAGE = "No free room PIN is available.";
 
 export type RoomStore = {
-  createRoom: (hostSocketId: string) => { room: Room; displaced: DisconnectResult };
+  createRoom: (hostSocketId: string) => { room: Room; token: string; displaced: DisconnectResult };
   join: (pin: string, nickname: string, socketId: string) => JoinResult;
   disconnect: (socketId: string) => DisconnectResult;
+  suspendHost: (socketId: string) => DisconnectResult;
+  resumeHost: (pin: string, token: string, socketId: string) => ResumeResult;
+  expireHost: (pin: string) => DisconnectResult;
   getRoom: (pin: string) => Room | null;
 };
 
@@ -74,8 +88,17 @@ function sameNickname(left: string, right: string): boolean {
   return left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US");
 }
 
+function tokensMatch(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  if (leftBytes.length === 0 || leftBytes.length !== rightBytes.length) {
+    return false;
+  }
+  return timingSafeEqual(leftBytes, rightBytes);
+}
+
 export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
-  const rooms = new Map<string, Room>();
+  const rooms = new Map<string, StoredRoom>();
   const membership = new Map<string, Membership>();
   const randomPin = options.randomPin ?? (() => randomInt(0, 10_000));
 
@@ -105,22 +128,69 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
   }
 
   function disconnect(socketId: string): DisconnectResult {
+    return removeMember(socketId, true);
+  }
+
+  function suspendHost(socketId: string): DisconnectResult {
+    return removeMember(socketId, false);
+  }
+
+  function removeMember(socketId: string, immediate: boolean): DisconnectResult {
     const current = membership.get(socketId);
     if (!current) {
       return { type: "none" };
     }
 
-    if (current.role === "host") {
-      deleteRoom(current.pin);
-      return { type: "room_closed", pin: current.pin };
+    if (current.role === "player") {
+      const room = removePlayer(current.pin, socketId);
+      if (!room) {
+        return { type: "none" };
+      }
+      return { type: "player_left", room };
     }
 
-    const room = removePlayer(current.pin, socketId);
-    if (!room) {
+    if (!immediate) {
+      const room = rooms.get(current.pin);
+      if (!room) {
+        membership.delete(socketId);
+        return { type: "none" };
+      }
+
+      room.hostAway = true;
+      room.hostSocketId = "";
+      membership.delete(socketId);
+      return { type: "host_away", pin: room.pin, reservationSocketId: socketId };
+    }
+
+    deleteRoom(current.pin);
+    return { type: "room_closed", pin: current.pin };
+  }
+
+  function resumeHost(pinInput: string, token: string, socketId: string): ResumeResult {
+    const pin = normalizePin(pinInput);
+    const room = pin ? rooms.get(pin) : undefined;
+    if (!pin || !room || !room.hostAway || !tokensMatch(room.hostToken, token)) {
+      return { ok: false, message: HOST_ERRORS.roomGone };
+    }
+
+    if (membership.has(socketId)) {
+      return { ok: false, message: HOST_ERRORS.roomGone };
+    }
+
+    room.hostAway = false;
+    room.hostSocketId = socketId;
+    membership.set(socketId, { role: "host", pin: room.pin });
+    return { ok: true, room: snapshot(room), token: room.hostToken };
+  }
+
+  function expireHost(pin: string): DisconnectResult {
+    const room = rooms.get(pin);
+    if (!room || !room.hostAway) {
       return { type: "none" };
     }
 
-    return { type: "player_left", room };
+    deleteRoom(pin);
+    return { type: "room_closed", pin };
   }
 
   function allocatePin(): string | null {
@@ -141,17 +211,22 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     return null;
   }
 
-  function createRoom(hostSocketId: string): { room: Room; displaced: DisconnectResult } {
+  function createRoom(hostSocketId: string): {
+    room: Room;
+    token: string;
+    displaced: DisconnectResult;
+  } {
     const pin = allocatePin();
     if (!pin) {
       throw new Error(NO_FREE_PIN_MESSAGE);
     }
 
     const displaced = disconnect(hostSocketId);
-    const room: Room = { pin, hostSocketId, players: [] };
+    const hostToken = randomBytes(16).toString("hex");
+    const room: StoredRoom = { pin, hostSocketId, players: [], hostToken, hostAway: false };
     rooms.set(pin, room);
     membership.set(hostSocketId, { role: "host", pin });
-    return { room: snapshot(room), displaced };
+    return { room: snapshot(room), token: hostToken, displaced };
   }
 
   function join(pinInput: string, nicknameInput: string, socketId: string): JoinResult {
@@ -214,5 +289,5 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     return room ? snapshot(room) : null;
   }
 
-  return { createRoom, join, disconnect, getRoom };
+  return { createRoom, join, disconnect, suspendHost, resumeHost, expireHost, getRoom };
 }

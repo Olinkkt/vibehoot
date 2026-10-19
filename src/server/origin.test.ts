@@ -3,7 +3,8 @@ import { createServer } from "node:http";
 import { describe, it } from "node:test";
 import { Server } from "socket.io";
 import { io as ioClient } from "socket.io-client";
-import { isAllowedOrigin, socketAllowRequest } from "./origin";
+import type { IncomingMessage } from "node:http";
+import { isAllowedHost, isAllowedOrigin, socketAllowRequest } from "./origin";
 
 describe("socket origin allowlist", () => {
   it("allows a missing origin, the request host, and configured origins", () => {
@@ -13,6 +14,55 @@ describe("socket origin allowlist", () => {
     assert.equal(isAllowedOrigin("https://quiz.example", "internal:3000", allowed), true);
     assert.equal(isAllowedOrigin("https://evil.example", "localhost:3000", allowed), false);
     assert.equal(isAllowedOrigin("not a url", "localhost:3000", allowed), false);
+  });
+
+  it("allows every host when ALLOWED_HOSTS is empty and matches the list when it is set", () => {
+    assert.equal(isAllowedHost("evil.example:3001", []), true);
+    assert.equal(isAllowedHost(undefined, []), true);
+
+    const allowed = ["localhost", "127.0.0.1", "quiz.example:3000", "[::1]"];
+    assert.equal(isAllowedHost("localhost:3000", allowed), true);
+    assert.equal(isAllowedHost("LOCALHOST", allowed), true);
+    assert.equal(isAllowedHost("127.0.0.1:3000", allowed), true);
+    assert.equal(isAllowedHost("quiz.example:3000", allowed), true);
+    assert.equal(isAllowedHost("quiz.example:3001", allowed), false);
+    assert.equal(isAllowedHost("[::1]:3000", allowed), true);
+    assert.equal(isAllowedHost("evil.example:3001", allowed), false);
+    assert.equal(isAllowedHost(undefined, allowed), false);
+    assert.equal(isAllowedHost("   ", allowed), false);
+  });
+
+  it("rejects a socket handshake whose host is outside ALLOWED_HOSTS", () => {
+    const previous = process.env.ALLOWED_HOSTS;
+    process.env.ALLOWED_HOSTS = "localhost,127.0.0.1";
+
+    const decide = (headers: IncomingMessage["headers"]): boolean => {
+      let allowed = false;
+      const request = { headers } as IncomingMessage;
+      socketAllowRequest(request, (_error, success) => {
+        allowed = success;
+      });
+      return allowed;
+    };
+
+    try {
+      assert.equal(
+        decide({ host: "evil.example:3001", origin: "http://evil.example:3001" }),
+        false,
+      );
+      assert.equal(decide({ host: "localhost:3000", origin: "https://evil.example" }), false);
+      assert.equal(
+        decide({ host: "localhost:3000", origin: "http://localhost:3000" }),
+        true,
+      );
+      assert.equal(decide({ host: "127.0.0.1:3000" }), true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ALLOWED_HOSTS;
+      } else {
+        process.env.ALLOWED_HOSTS = previous;
+      }
+    }
   });
 
   it("rejects a websocket connection from a foreign origin", { timeout: 5000 }, async () => {

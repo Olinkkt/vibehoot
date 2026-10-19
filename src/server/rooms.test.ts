@@ -224,4 +224,48 @@ describe("room store", () => {
     assert.equal(store.getRoom("3333")?.hostSocketId, "host-a");
     assert.deepEqual(store.disconnect("host-a"), { type: "room_closed", pin: "3333" });
   });
+
+  it("keeps the PIN and players while the host is away and restores them on resume", () => {
+    const store = createRoomStore({ randomPin: () => 4242 });
+    const created = store.createRoom("host");
+    store.join("4242", "Ada", "p1");
+
+    assert.deepEqual(store.suspendHost("host"), {
+      type: "host_away",
+      pin: "4242",
+      reservationSocketId: "host",
+    });
+    assert.equal(store.getRoom("4242")?.hostSocketId, "");
+    assert.equal(store.getRoom("4242")?.players[0]?.nickname, "Ada");
+    assert.equal(store.resumeHost("4242", "0".repeat(32), "host-2").ok, false);
+    assert.equal(store.getRoom("4242")?.hostSocketId, "");
+
+    const resumed = store.resumeHost("4242", created.token, "host-2");
+    assert.equal(resumed.ok, true);
+    if (resumed.ok) {
+      assert.equal(resumed.room.pin, "4242");
+      assert.equal(resumed.room.hostSocketId, "host-2");
+      assert.deepEqual(
+        resumed.room.players.map((player) => player.nickname),
+        ["Ada"],
+      );
+      assert.equal(resumed.token, created.token);
+    }
+
+    assert.equal(store.expireHost("4242").type, "none");
+    assert.equal(store.disconnect("host").type, "none");
+    assert.equal(store.getRoom("4242")?.hostSocketId, "host-2");
+  });
+
+  it("deletes the room when the host grace period expires", () => {
+    const store = createRoomStore({ randomPin: () => 5150 });
+    store.createRoom("host");
+    store.join("5150", "Ada", "p1");
+    store.suspendHost("host");
+
+    assert.deepEqual(store.expireHost("5150"), { type: "room_closed", pin: "5150" });
+    assert.equal(store.getRoom("5150"), null);
+    assert.equal(store.disconnect("p1").type, "none");
+    assert.equal(store.resumeHost("5150", "ab".repeat(16), "host-2").ok, false);
+  });
 });

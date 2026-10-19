@@ -14,6 +14,7 @@ export const HOST_ERRORS = {
   noRooms: "No rooms available, try again later.",
   tooFast: "Please wait a moment before creating another room.",
   tooMany: "Too many rooms from this network. Try again later.",
+  roomGone: "That room is no longer open.",
 } as const;
 
 const DISALLOWED_CHARS = /[\p{Cc}\p{Cf}]/gu;

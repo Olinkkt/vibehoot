@@ -32,4 +32,59 @@ describe("host create limiter", () => {
     limiter.release("socket-1");
     assert.deepEqual(limiter.tryAcquire("socket-4", "10.0.0.9"), { ok: true, reserved: true });
   });
+
+  it("keeps the cooldown after release and drops it on forget", () => {
+    let now = 5_000;
+    const limiter = createCreateLimiter({
+      cooldownMs: 1_000,
+      maxPerIp: 2,
+      now: () => now,
+    });
+
+    assert.equal(limiter.tryAcquire("socket-1", "10.0.0.1").ok, true);
+    assert.equal(limiter.tryAcquire("socket-2", "10.0.0.2").ok, true);
+    assert.deepEqual(limiter.sizes(), { timestamps: 2, sockets: 2, ips: 2 });
+
+    limiter.release("socket-1");
+    assert.deepEqual(limiter.sizes(), { timestamps: 2, sockets: 1, ips: 1 });
+    assert.deepEqual(limiter.tryAcquire("socket-1", "10.0.0.1"), {
+      ok: false,
+      message: HOST_ERRORS.tooFast,
+    });
+
+    limiter.forget("socket-1");
+    limiter.forget("socket-2");
+    assert.deepEqual(limiter.sizes(), { timestamps: 0, sockets: 0, ips: 0 });
+
+    now += 1;
+    assert.deepEqual(limiter.tryAcquire("socket-1", "10.0.0.1"), { ok: true, reserved: true });
+    limiter.forget("missing");
+    assert.deepEqual(limiter.sizes(), { timestamps: 1, sockets: 1, ips: 1 });
+  });
+
+  it("keeps the IP cap while a cooldown timestamp is cleared and moved", () => {
+    const limiter = createCreateLimiter({
+      cooldownMs: 1_000,
+      maxPerIp: 1,
+      now: () => 1_000,
+    });
+
+    assert.equal(limiter.tryAcquire("old", "10.0.0.1").ok, true);
+    limiter.clearCooldown("old");
+    assert.deepEqual(limiter.sizes(), { timestamps: 0, sockets: 1, ips: 1 });
+    assert.deepEqual(limiter.tryAcquire("other", "10.0.0.1"), {
+      ok: false,
+      message: HOST_ERRORS.tooMany,
+    });
+
+    limiter.reassign("old", "new");
+    assert.deepEqual(limiter.sizes(), { timestamps: 0, sockets: 1, ips: 1 });
+    assert.deepEqual(limiter.tryAcquire("other", "10.0.0.1"), {
+      ok: false,
+      message: HOST_ERRORS.tooMany,
+    });
+
+    limiter.release("new");
+    assert.deepEqual(limiter.tryAcquire("other", "10.0.0.1"), { ok: true, reserved: true });
+  });
 });

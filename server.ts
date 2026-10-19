@@ -4,8 +4,9 @@ import { parse } from "node:url";
 import next from "next";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "./src/shared/events";
-import { socketAllowRequest } from "./src/server/origin";
+import { isAllowedHost, socketAllowRequest } from "./src/server/origin";
 import { attachGameServer } from "./src/server/socket";
+import { startupMessages } from "./src/server/startup-log";
 
 const dev = process.env.NODE_ENV !== "production";
 const bindHost = process.env.HOST;
@@ -29,14 +30,45 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
 attachGameServer(io);
 
 io.engine.on("connection_error", (error: unknown) => {
-  console.error("Socket.io connection error", error);
+  console.error(connectionErrorLine(error));
 });
+
+const MAX_CONNECTION_ERROR_MESSAGE = 300;
+
+function connectionErrorLine(error: unknown): string {
+  let code = "unknown";
+  let message = "unknown";
+  if (typeof error === "object" && error !== null) {
+    const record = error as { code?: unknown; message?: unknown };
+    if (typeof record.code === "number" || typeof record.code === "string") {
+      code = String(record.code);
+    }
+    if (typeof record.message === "string" && record.message.trim().length > 0) {
+      message = record.message;
+    }
+  }
+
+  const oneLine = message.replaceAll(/[\r\n]+/g, " ").slice(0, MAX_CONNECTION_ERROR_MESSAGE);
+  return `Socket.io connection error code=${code} message=${oneLine}`;
+}
+
+function requestHost(request: IncomingMessage): string | undefined {
+  const value = request.headers.host;
+  return Array.isArray(value) ? value[0] : value;
+}
 
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   try {
+    if (!isAllowedHost(requestHost(request))) {
+      response.statusCode = 403;
+      response.setHeader("content-type", "text/plain; charset=utf-8");
+      response.end("forbidden");
+      return;
+    }
+
     const parsedUrl = parse(request.url ?? "/", true);
     await handle(request, response, parsedUrl);
   } catch (error: unknown) {
@@ -47,13 +79,6 @@ async function handleRequest(
       response.end("internal server error");
     }
   }
-}
-
-function formatHost(host: string): string {
-  if (host.includes(":") && !host.startsWith("[")) {
-    return `[${host}]`;
-  }
-  return host;
 }
 
 function lanAddresses(): string[] {
@@ -71,23 +96,13 @@ function lanAddresses(): string[] {
 
 void app.prepare().then(() => {
   const onListening = () => {
-    const mode = dev ? "development" : "production";
-    const shownHost = bindHost && bindHost.length > 0 ? formatHost(bindHost) : "localhost";
-    console.log(
-      `> Slophoot ready on http://${shownHost}:${port.toString()} (${mode}, socket.io attached)`,
-    );
-    if (bindHost && bindHost.length > 0) {
-      return;
-    }
-
-    const lan = lanAddresses();
-    if (lan.length === 0) {
-      return;
-    }
-
-    console.log("> Players on this network can open:");
-    for (const address of lan) {
-      console.log(`>   http://${address}:${port.toString()}`);
+    for (const line of startupMessages({
+      bindHost,
+      port,
+      dev,
+      lan: lanAddresses(),
+    })) {
+      console.log(line);
     }
   };
 

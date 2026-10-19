@@ -10,9 +10,23 @@ export type AcquireResult =
   | { ok: true; reserved: boolean }
   | { ok: false; message: string };
 
+export type LimiterSizes = {
+  timestamps: number;
+  sockets: number;
+  ips: number;
+};
+
 export type CreateLimiter = {
   tryAcquire: (socketId: string, ip: string) => AcquireResult;
+  /** Drops the IP reservation. The per-socket cooldown timestamp stays. */
   release: (socketId: string) => void;
+  /** Drops the cooldown timestamp and the IP reservation. */
+  forget: (socketId: string) => void;
+  /** Drops only the cooldown timestamp. The IP reservation stays. */
+  clearCooldown: (socketId: string) => void;
+  /** Moves an IP reservation onto a new socket id. */
+  reassign: (fromSocketId: string, toSocketId: string) => void;
+  sizes: () => LimiterSizes;
 };
 
 const DEFAULT_COOLDOWN_MS = 1_000;
@@ -73,5 +87,52 @@ export function createCreateLimiter(options: CreateLimiterOptions = {}): CreateL
     }
   }
 
-  return { tryAcquire, release };
+  function forget(socketId: string): void {
+    lastCreateAt.delete(socketId);
+    release(socketId);
+  }
+
+  function clearCooldown(socketId: string): void {
+    lastCreateAt.delete(socketId);
+  }
+
+  function reassign(fromSocketId: string, toSocketId: string): void {
+    if (fromSocketId === toSocketId) {
+      return;
+    }
+
+    const ip = ipBySocket.get(fromSocketId);
+    if (!ip) {
+      lastCreateAt.delete(fromSocketId);
+      return;
+    }
+
+    ipBySocket.delete(fromSocketId);
+    if (ipBySocket.has(toSocketId)) {
+      const nextCount = (roomsByIp.get(ip) ?? 1) - 1;
+      if (nextCount <= 0) {
+        roomsByIp.delete(ip);
+      } else {
+        roomsByIp.set(ip, nextCount);
+      }
+    } else {
+      ipBySocket.set(toSocketId, ip);
+    }
+
+    const stamp = lastCreateAt.get(fromSocketId);
+    lastCreateAt.delete(fromSocketId);
+    if (stamp !== undefined && !lastCreateAt.has(toSocketId)) {
+      lastCreateAt.set(toSocketId, stamp);
+    }
+  }
+
+  function sizes(): LimiterSizes {
+    return {
+      timestamps: lastCreateAt.size,
+      sockets: ipBySocket.size,
+      ips: roomsByIp.size,
+    };
+  }
+
+  return { tryAcquire, release, forget, clearCooldown, reassign, sizes };
 }
