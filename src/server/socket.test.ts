@@ -175,7 +175,7 @@ describe("game socket", () => {
   });
 
   it("rate-limits host:create per socket and per address", { timeout: 5000 }, async () => {
-    let now = 5_000;
+    const now = 5_000;
     const limiter = createCreateLimiter({
       cooldownMs: 1_000,
       maxPerIp: 1,
