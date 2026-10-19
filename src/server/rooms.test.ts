@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoomStore } from "./rooms";
-import { JOIN_ERRORS, normalizeNickname } from "../shared/validation";
+import {
+  JOIN_ERRORS,
+  NICKNAME_DRAFT_CAP,
+  NICKNAME_MAX_LENGTH,
+  capNicknameDraft,
+  nicknameLength,
+  normalizeNickname,
+} from "../shared/validation";
 
 function pins(...values: number[]): () => number {
   let index = 0;
@@ -154,6 +161,19 @@ describe("room store", () => {
       type: "player_left",
       room: store.getRoom("2222"),
     });
+  });
+
+  it("counts nickname drafts in code points and keeps input past 20 characters", () => {
+    const twentyEmoji = "😀".repeat(NICKNAME_MAX_LENGTH);
+    const twentyOneEmoji = "😀".repeat(NICKNAME_MAX_LENGTH + 1);
+    assert.equal(capNicknameDraft(twentyEmoji), twentyEmoji);
+    assert.equal(capNicknameDraft(twentyOneEmoji), twentyOneEmoji);
+    assert.equal(nicknameLength(normalizeNickname(capNicknameDraft(twentyOneEmoji))), 21);
+    assert.equal(capNicknameDraft("a".repeat(25)), "a".repeat(25));
+
+    const capped = capNicknameDraft("😀".repeat(NICKNAME_DRAFT_CAP + 5));
+    assert.equal(nicknameLength(capped), NICKNAME_DRAFT_CAP);
+    assert.equal(capped.length, NICKNAME_DRAFT_CAP * 2);
   });
 
   it("strips format characters before the duplicate and empty checks", () => {

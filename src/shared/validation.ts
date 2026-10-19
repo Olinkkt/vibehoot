@@ -1,4 +1,5 @@
 export const NICKNAME_MAX_LENGTH = 20;
+export const NICKNAME_DRAFT_CAP = 100;
 export const PIN_LENGTH = 4;
 
 export const JOIN_ERRORS = {
@@ -29,6 +30,10 @@ export function normalizeNickname(value: string): string {
 
 export function nicknameLength(value: string): number {
   return Array.from(value).length;
+}
+
+export function capNicknameDraft(value: string): string {
+  return Array.from(value).slice(0, NICKNAME_DRAFT_CAP).join("");
 }
 
 export function normalizePin(value: string): string | null {

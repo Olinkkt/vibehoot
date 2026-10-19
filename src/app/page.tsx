@@ -8,6 +8,7 @@ import {
   JOIN_ERRORS,
   NICKNAME_MAX_LENGTH,
   PIN_LENGTH,
+  capNicknameDraft,
   nicknameLength,
   normalizeNickname,
   normalizePin,
@@ -175,9 +176,11 @@ export default function JoinPage() {
   }, [pinFocusKey]);
 
   const nicknameCount = nicknameLength(normalizeNickname(nickname));
+  const nicknameOverLimit = nicknameCount > NICKNAME_MAX_LENGTH;
+  const nicknameError = nicknameOverLimit ? JOIN_ERRORS.nicknameTooLong : errors.nickname;
   const nicknameDescribedBy = [
     "nickname-count",
-    errors.nickname ? "nickname-error" : null,
+    nicknameError ? "nickname-error" : null,
   ]
     .filter((id): id is string => id !== null)
     .join(" ");
@@ -262,7 +265,7 @@ export default function JoinPage() {
                 name="nickname"
                 value={nickname}
                 onChange={(event) => {
-                  setNickname(event.target.value.slice(0, 40));
+                  setNickname(capNicknameDraft(event.target.value));
                   setErrors((current) =>
                     current.nickname ? { ...current, nickname: undefined } : current,
                   );
@@ -270,24 +273,30 @@ export default function JoinPage() {
                 autoComplete="nickname"
                 autoCapitalize="words"
                 enterKeyHint="go"
-                maxLength={40}
-                aria-invalid={errors.nickname ? true : undefined}
+                aria-invalid={nicknameError ? true : undefined}
                 aria-describedby={nicknameDescribedBy}
-                className={fieldClassName}
+                className={`${fieldClassName}${nicknameOverLimit ? " border-red-800" : ""}`}
               />
-              <p id="nickname-count" className="mt-2 text-sm text-muted tabular-nums">
+              <p
+                id="nickname-count"
+                className={`mt-2 text-sm tabular-nums ${nicknameOverLimit ? "font-medium text-red-800" : "text-muted"}`}
+              >
                 {nicknameCount} / {NICKNAME_MAX_LENGTH}
               </p>
-              {errors.nickname ? (
-                <p id="nickname-error" role="alert" className="mt-2 text-sm font-medium text-red-800">
-                  {errors.nickname}
+              {nicknameError ? (
+                <p
+                  id="nickname-error"
+                  role={errors.nickname ? "alert" : undefined}
+                  className="mt-2 text-sm font-medium text-red-800"
+                >
+                  {nicknameError}
                 </p>
               ) : null}
             </div>
 
             <button
               type="submit"
-              disabled={!connected || joining}
+              disabled={!connected || joining || nicknameOverLimit}
               className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-5 text-base font-semibold text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-700"
             >
               {joining ? "Joining…" : "Join"}
