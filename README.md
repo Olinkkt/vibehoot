@@ -1,6 +1,6 @@
 # Slophoot
 
-Self-hosted Kahoot-style quiz. This milestone is the lobby: a host creates a room, players join with a PIN and nickname, and the host sees the list update live. Starting the game is not implemented yet. Room state lives in memory and is cleared when the server restarts.
+Self-hosted Kahoot-style quiz. The GitHub repository is [Olinkkt/vibehoot](https://github.com/Olinkkt/vibehoot); the app name is Slophoot. This milestone is the lobby: a host creates a room, players join with a PIN and nickname, and the host sees the list update live. Starting the game is not implemented yet. Room state lives in memory and is cleared when the server restarts.
 
 ## Run in development
 
