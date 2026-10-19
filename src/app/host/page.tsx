@@ -160,15 +160,11 @@ export default function HostPage() {
             <button
               type="button"
               disabled
-              aria-describedby="start-game-hint"
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-zinc-200 px-6 text-base font-semibold text-zinc-700 sm:w-auto"
             >
               <Play aria-hidden="true" className="size-5" strokeWidth={2.25} />
-              Start game
+              Start game – coming soon
             </button>
-            <p id="start-game-hint" className="text-sm text-muted">
-              Starting the game is not available yet.
-            </p>
           </div>
         </div>
       ) : (
