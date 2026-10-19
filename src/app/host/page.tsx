@@ -16,14 +16,14 @@ function PinDigits({ pin }: { pin: string }) {
 
   return (
     <p
-      className="mt-3 flex justify-center gap-[0.06em] font-scoreboard text-[clamp(5.5rem,16vw,11rem)] leading-none font-semibold text-foreground"
+      className="mt-4 flex justify-center gap-[0.08em] font-scoreboard text-[clamp(5.5rem,18vw,8rem)] leading-none font-semibold text-foreground sm:gap-[0.15em] sm:text-[clamp(7.5rem,14vw,15rem)]"
       aria-label={`Game PIN ${digits.join(" ")}`}
     >
       {digits.map((digit, index) => (
         <span
           key={`${pin}-${index.toString()}`}
           aria-hidden="true"
-          className="inline-block min-w-[0.72em] text-center"
+          className="inline-block min-w-[0.72em] text-center sm:min-w-[0.9em]"
         >
           {digit}
         </span>
@@ -119,7 +119,7 @@ export default function HostPage() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-6 py-8">
       <header className="flex items-center justify-between">
-        <p className="text-sm font-semibold tracking-tight">Slophoot</p>
+        <p className="text-xl font-semibold tracking-tight sm:text-3xl">Slophoot</p>
         <p className="text-sm font-medium text-muted">Host</p>
       </header>
 

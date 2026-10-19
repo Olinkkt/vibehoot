@@ -187,13 +187,13 @@ export default function JoinPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4 py-8">
-      <p className="text-sm font-semibold tracking-tight">Slophoot</p>
+      <p className="text-xl font-semibold tracking-tight sm:text-3xl">Slophoot</p>
 
       {phase === "waiting" ? (
         <div className="mt-10">
           <h1 className="text-4xl font-semibold tracking-tight text-balance">{"You're in!"}</h1>
           <p role="status" className="mt-4 text-lg">
-            Waiting for the host...
+            Waiting for the host…
           </p>
           <p className="mt-6 text-sm text-muted">
             Joined as <span className="font-semibold text-foreground">{joinedName}</span>
