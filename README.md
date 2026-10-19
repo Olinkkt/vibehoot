@@ -43,6 +43,8 @@ Room rules are covered by `npm test`. `npm run lint` checks the source, and `npm
 
 `ALLOWED_ORIGINS` is an optional comma-separated list of extra browser origins allowed to open a Socket.io connection, for example `https://quiz.example.com`. A connection is allowed when its `Origin` host matches the request `Host`, when that origin is in the list, or when the request has no `Origin` header (non-browser clients). Other origins are refused.
 
+`ALLOWED_HOSTS` is an optional comma-separated list of hostnames or IP addresses this server should answer for. A port is optional (`localhost`, `127.0.0.1`, `192.168.1.20:3000`, `[::1]`). When the variable is set, HTTP requests and Socket.io connections whose `Host` header is not in the list are rejected. An entry without a port matches that host on any port; an entry with a port must match exactly. When `ALLOWED_HOSTS` is unset, every `Host` value is accepted and the origin check is unchanged. Set it when the process is reachable from a network you do not fully trust, so a DNS-rebinding client cannot pass the origin check by sending a matching `Host` and `Origin`.
+
 ## Dependency audit
 
 `npm audit` reports [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) on upstream `braces` (a transitive ESLint dependency, dev-only). It only expands glob patterns from this repo's own ESLint config, so the advisory is accepted. Do not run `npm audit fix --force` to clear it: that downgrades `eslint-config-next`.

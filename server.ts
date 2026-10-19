@@ -4,7 +4,7 @@ import { parse } from "node:url";
 import next from "next";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "./src/shared/events";
-import { socketAllowRequest } from "./src/server/origin";
+import { isAllowedHost, socketAllowRequest } from "./src/server/origin";
 import { attachGameServer } from "./src/server/socket";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -51,11 +51,23 @@ function connectionErrorLine(error: unknown): string {
   return `Socket.io connection error code=${code} message=${oneLine}`;
 }
 
+function requestHost(request: IncomingMessage): string | undefined {
+  const value = request.headers.host;
+  return Array.isArray(value) ? value[0] : value;
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   try {
+    if (!isAllowedHost(requestHost(request))) {
+      response.statusCode = 403;
+      response.setHeader("content-type", "text/plain; charset=utf-8");
+      response.end("forbidden");
+      return;
+    }
+
     const parsedUrl = parse(request.url ?? "/", true);
     await handle(request, response, parsedUrl);
   } catch (error: unknown) {
