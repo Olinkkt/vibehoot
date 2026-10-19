@@ -40,14 +40,20 @@ function isJoinPayload(payload: unknown): payload is PlayerJoinPayload {
   return typeof record.pin === "string" && typeof record.nickname === "string";
 }
 
+function closeChannel(io: GameServer, pin: string, except?: GameSocket): void {
+  const roomChannel = channel(pin);
+  const target = except ? except.to(roomChannel) : io.to(roomChannel);
+  target.emit("room:closed");
+  io.in(roomChannel).socketsLeave(roomChannel);
+}
+
 function announceDisplacement(
   io: GameServer,
   socket: GameSocket,
   displaced: DisconnectResult,
 ): void {
   if (displaced.type === "room_closed") {
-    socket.to(channel(displaced.pin)).emit("room:closed");
-    void socket.leave(channel(displaced.pin));
+    closeChannel(io, displaced.pin, socket);
     return;
   }
 
@@ -106,9 +112,7 @@ export function attachGameServer(
 
       if (result.closedPin) {
         limiter.release(socket.id);
-        const closedChannel = channel(result.closedPin);
-        socket.to(closedChannel).emit("room:closed");
-        io.in(closedChannel).socketsLeave(closedChannel);
+        closeChannel(io, result.closedPin, socket);
       }
 
       if (result.previousRoom) {
@@ -126,7 +130,7 @@ export function attachGameServer(
       const result = store.disconnect(socket.id);
       limiter.release(socket.id);
       if (result.type === "room_closed") {
-        io.to(channel(result.pin)).emit("room:closed");
+        closeChannel(io, result.pin);
         return;
       }
 

@@ -42,6 +42,7 @@ function connect(port: number): Promise<TestClient> {
   const socket: TestClient = ioClient(`http://127.0.0.1:${port}`, {
     transports: ["websocket"],
     forceNew: true,
+    reconnection: false,
   });
 
   return new Promise((resolve, reject) => {
@@ -194,6 +195,62 @@ describe("game socket", () => {
         second.emit("host:create");
         assert.equal((await capped).message, HOST_ERRORS.tooMany);
         assert.equal(store.getRoom("5555"), null);
+      },
+      limiter,
+    );
+  });
+
+  it("removes players from the channel when the host disconnects", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: () => 8463 });
+
+    await withServer(store, async (port, io) => {
+      const host = await connect(port);
+      const player = await connect(port);
+      openClients.push(host, player);
+
+      const created = waitFor<LobbyUpdate>(host, "lobby:update");
+      host.emit("host:create");
+      await created;
+
+      const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+      player.emit("player:join", { pin: "8463", nickname: "Ada" });
+      await joined;
+      assert.equal(io.sockets.sockets.get(player.id)?.rooms.has("room:8463"), true);
+
+      const closed = waitFor<undefined>(player, "room:closed");
+      host.disconnect();
+      await closed;
+      assert.equal(io.sockets.sockets.get(player.id)?.rooms.has("room:8463"), false);
+    });
+  });
+
+  it("removes players from the previous channel when the host creates again", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: pins(1322, 2468) });
+    const limiter = createCreateLimiter({ cooldownMs: 0, maxPerIp: 5, now: () => 0 });
+
+    await withServer(
+      store,
+      async (port, io) => {
+        const host = await connect(port);
+        const player = await connect(port);
+        openClients.push(host, player);
+
+        const created = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        assert.equal((await created).pin, "1322");
+
+        const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+        player.emit("player:join", { pin: "1322", nickname: "Ada" });
+        await joined;
+
+        const closed = waitFor<undefined>(player, "room:closed");
+        const nextLobby = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        await closed;
+        assert.equal((await nextLobby).pin, "2468");
+        assert.equal(io.sockets.sockets.get(player.id)?.rooms.has("room:1322"), false);
+        assert.equal(io.sockets.sockets.get(host.id)?.rooms.has("room:1322"), false);
+        assert.equal(io.sockets.sockets.get(host.id)?.rooms.has("room:2468"), true);
       },
       limiter,
     );

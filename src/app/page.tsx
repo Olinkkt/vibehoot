@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useEffectEvent, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent } from "react";
 import { useSocket } from "@/lib/socket";
 import type { JoinErrorPayload, LobbyUpdate } from "@/shared/events";
 import {
@@ -52,9 +52,10 @@ export default function JoinPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [joining, setJoining] = useState(false);
   const [joinedName, setJoinedName] = useState("");
+  const joinedPinRef = useRef<string | null>(null);
 
   const onLobbyUpdate = useEffectEvent((state: LobbyUpdate) => {
-    if (phase === "closed") {
+    if (phase === "closed" || (joinedPinRef.current !== null && state.pin !== joinedPinRef.current)) {
       return;
     }
 
@@ -77,6 +78,7 @@ export default function JoinPage() {
   });
 
   const onRoomClosed = useEffectEvent(() => {
+    joinedPinRef.current = null;
     setJoining(false);
     setPhase("closed");
   });
@@ -84,6 +86,7 @@ export default function JoinPage() {
   const onDisconnect = useEffectEvent(() => {
     setJoining(false);
     if (phase === "waiting") {
+      joinedPinRef.current = null;
       setErrors({ form: "You were disconnected. Join again." });
       setPhase("form");
     }
@@ -146,6 +149,7 @@ export default function JoinPage() {
         return;
       }
 
+      joinedPinRef.current = normalizedPin;
       setJoining(true);
       socket.emit("player:join", { pin: normalizedPin, nickname });
     },
@@ -153,6 +157,7 @@ export default function JoinPage() {
   );
 
   const joinAnother = useCallback(() => {
+    joinedPinRef.current = null;
     setPhase("form");
     setJoining(false);
     setErrors({});
