@@ -128,7 +128,7 @@ export function attachGameServer(
 
     socket.on("disconnect", () => {
       const result = store.disconnect(socket.id);
-      limiter.release(socket.id);
+      limiter.forget(socket.id);
       if (result.type === "room_closed") {
         closeChannel(io, result.pin);
         return;

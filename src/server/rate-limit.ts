@@ -10,9 +10,19 @@ export type AcquireResult =
   | { ok: true; reserved: boolean }
   | { ok: false; message: string };
 
+export type LimiterSizes = {
+  timestamps: number;
+  sockets: number;
+  ips: number;
+};
+
 export type CreateLimiter = {
   tryAcquire: (socketId: string, ip: string) => AcquireResult;
+  /** Drops the IP reservation. The per-socket cooldown timestamp stays. */
   release: (socketId: string) => void;
+  /** Drops the cooldown timestamp and the IP reservation. */
+  forget: (socketId: string) => void;
+  sizes: () => LimiterSizes;
 };
 
 const DEFAULT_COOLDOWN_MS = 1_000;
@@ -73,5 +83,18 @@ export function createCreateLimiter(options: CreateLimiterOptions = {}): CreateL
     }
   }
 
-  return { tryAcquire, release };
+  function forget(socketId: string): void {
+    lastCreateAt.delete(socketId);
+    release(socketId);
+  }
+
+  function sizes(): LimiterSizes {
+    return {
+      timestamps: lastCreateAt.size,
+      sockets: ipBySocket.size,
+      ips: roomsByIp.size,
+    };
+  }
+
+  return { tryAcquire, release, forget, sizes };
 }
