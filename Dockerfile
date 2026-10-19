@@ -4,8 +4,11 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 
+# Ensure devDependencies are installed even if build-time NODE_ENV=production is set
+ENV NODE_ENV=development
+
 COPY package.json package-lock.json .npmrc ./
-RUN npm ci
+RUN npm ci --include=dev
 
 # Stage 2: Build application
 FROM node:22-alpine AS builder

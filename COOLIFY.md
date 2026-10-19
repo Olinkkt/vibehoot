@@ -45,7 +45,7 @@ Navigate to the **Environment Variables** tab in your application and set the fo
 
 | Variable | Recommended Value | Description |
 |---|---|---|
-| `NODE_ENV` | `production` | Enables production optimizations for Next.js. |
+| `NODE_ENV` | `production` | Enables production optimizations for Next.js. Keep "Available at Buildtime" unchecked (runtime only). |
 | `PORT` | `3000` | Port the internal server listens on. |
 | `HOST` | `0.0.0.0` | Binds server to all interfaces inside the Docker container. |
 | `ALLOWED_HOSTS` | `quiz.example.com` *(optional)* | Comma-separated list of allowed hostnames (without `https://`). Protects against DNS rebinding. If unset, all incoming hosts are allowed. |
@@ -55,6 +55,7 @@ Navigate to the **Environment Variables** tab in your application and set the fo
 
 > [!TIP]
 > If you are testing with dynamic hostnames or unsure of your final domain yet, leave `ALLOWED_HOSTS` and `ALLOWED_ORIGINS` empty. The server defaults to accepting any valid host and matching origin.
+
 
 ### Step 4: Health Check (Optional)
 
