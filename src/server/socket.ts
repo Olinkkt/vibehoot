@@ -1,6 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import type {
   ClientToServerEvents,
+  HostResumePayload,
   LobbyUpdate,
   PlayerJoinPayload,
   ServerToClientEvents,
@@ -20,6 +21,12 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 
 const rooms = createRoomStore();
 
+export const HOST_RECONNECT_GRACE_MS = 12_000;
+
+export type AttachOptions = {
+  graceMs?: number;
+};
+
 function channel(pin: string): string {
   return `room:${pin}`;
 }
@@ -29,6 +36,15 @@ function toLobby(room: Room): LobbyUpdate {
     pin: room.pin,
     players: room.players.map((player) => ({ nickname: player.nickname })),
   };
+}
+
+function isResumePayload(payload: unknown): payload is HostResumePayload {
+  if (typeof payload !== "object" || payload === null) {
+    return false;
+  }
+
+  const record = payload as Record<string, unknown>;
+  return typeof record.pin === "string" && typeof record.token === "string";
 }
 
 function isJoinPayload(payload: unknown): payload is PlayerJoinPayload {
@@ -73,7 +89,54 @@ export function attachGameServer(
   io: GameServer,
   store: RoomStore = rooms,
   limiter: CreateLimiter = createCreateLimiter(),
+  options: AttachOptions = {},
 ): void {
+  const graceMs = options.graceMs ?? HOST_RECONNECT_GRACE_MS;
+  const graceTimers = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; reservationSocketId: string }
+  >();
+  let stopped = false;
+
+  function clearGrace(pin: string): string | null {
+    const pending = graceTimers.get(pin);
+    if (!pending) {
+      return null;
+    }
+
+    clearTimeout(pending.timer);
+    graceTimers.delete(pin);
+    return pending.reservationSocketId;
+  }
+
+  function armGrace(pin: string, reservationSocketId: string): void {
+    clearGrace(pin);
+    const timer = setTimeout(() => {
+      graceTimers.delete(pin);
+      if (stopped) {
+        return;
+      }
+
+      const expired = store.expireHost(pin);
+      if (expired.type !== "room_closed") {
+        return;
+      }
+
+      limiter.release(reservationSocketId);
+      closeChannel(io, pin);
+    }, graceMs);
+    timer.unref();
+    graceTimers.set(pin, { timer, reservationSocketId });
+  }
+
+  io.engine.on("close", () => {
+    stopped = true;
+    for (const pending of graceTimers.values()) {
+      clearTimeout(pending.timer);
+    }
+    graceTimers.clear();
+  });
+
   io.on("connection", (socket) => {
     socket.on("host:create", () => {
       const decision = limiter.tryAcquire(socket.id, clientAddress(socket));
@@ -83,9 +146,16 @@ export function attachGameServer(
       }
 
       try {
-        const { room, displaced } = store.createRoom(socket.id);
+        const { room, token, displaced } = store.createRoom(socket.id);
+        if (displaced.type === "room_closed") {
+          const reservationSocketId = clearGrace(displaced.pin);
+          if (reservationSocketId) {
+            limiter.release(reservationSocketId);
+          }
+        }
         announceDisplacement(io, socket, displaced);
         void socket.join(channel(room.pin));
+        socket.emit("host:ready", { pin: room.pin, token });
         socket.emit("lobby:update", toLobby(room));
       } catch (error: unknown) {
         if (decision.reserved) {
@@ -96,6 +166,28 @@ export function attachGameServer(
         }
         socket.emit("host:error", { message: HOST_ERRORS.noRooms });
       }
+    });
+
+    socket.on("host:resume", (payload: HostResumePayload) => {
+      if (!isResumePayload(payload)) {
+        socket.emit("host:error", { message: HOST_ERRORS.roomGone });
+        return;
+      }
+
+      const result = store.resumeHost(payload.pin, payload.token, socket.id);
+      if (!result.ok) {
+        socket.emit("host:error", { message: result.message });
+        return;
+      }
+
+      const reservationSocketId = clearGrace(result.room.pin);
+      if (reservationSocketId) {
+        limiter.reassign(reservationSocketId, socket.id);
+      }
+
+      void socket.join(channel(result.room.pin));
+      socket.emit("host:ready", { pin: result.room.pin, token: result.token });
+      socket.emit("lobby:update", toLobby(result.room));
     });
 
     socket.on("player:join", (payload: PlayerJoinPayload) => {
@@ -111,7 +203,8 @@ export function attachGameServer(
       }
 
       if (result.closedPin) {
-        limiter.release(socket.id);
+        const reservationSocketId = clearGrace(result.closedPin);
+        limiter.release(reservationSocketId ?? socket.id);
         closeChannel(io, result.closedPin, socket);
       }
 
@@ -127,7 +220,13 @@ export function attachGameServer(
     });
 
     socket.on("disconnect", () => {
-      const result = store.disconnect(socket.id);
+      const result = store.suspendHost(socket.id);
+      if (result.type === "host_away") {
+        limiter.clearCooldown(socket.id);
+        armGrace(result.pin, result.reservationSocketId);
+        return;
+      }
+
       limiter.forget(socket.id);
       if (result.type === "room_closed") {
         closeChannel(io, result.pin);

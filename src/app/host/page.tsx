@@ -4,12 +4,66 @@ import { Play, Users } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSocket } from "@/lib/socket";
-import type { HostErrorPayload, LobbyPlayer, LobbyUpdate } from "@/shared/events";
+import type { HostErrorPayload, HostReadyPayload, LobbyPlayer, LobbyUpdate } from "@/shared/events";
 
 type LobbyState = {
   pin: string;
   players: LobbyPlayer[];
 };
+
+type HostSession = {
+  pin: string;
+  token: string;
+};
+
+const HOST_SESSION_KEY = "slophoot-host";
+
+function readHostSession(): HostSession | null {
+  try {
+    const raw = window.sessionStorage.getItem(HOST_SESSION_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) {
+      return null;
+    }
+
+    if (!("pin" in parsed) || !("token" in parsed)) {
+      return null;
+    }
+
+    const { pin, token } = parsed;
+    if (typeof pin !== "string" || typeof token !== "string") {
+      return null;
+    }
+
+    if (!/^\d{4}$/.test(pin) || !/^[a-f0-9]{32}$/.test(token)) {
+      return null;
+    }
+
+    return { pin, token };
+  } catch {
+    return null;
+  }
+}
+
+function writeHostSession(session: HostSession): void {
+  try {
+    window.sessionStorage.setItem(HOST_SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // The open connection still works. A later refresh cannot reclaim the room.
+  }
+}
+
+function clearHostSession(): void {
+  try {
+    window.sessionStorage.removeItem(HOST_SESSION_KEY);
+  } catch {
+    // Ignore storage failures. The server still decides when the room closes.
+  }
+}
 
 function PinDigits({ pin }: { pin: string }) {
   const digits = pin.split("");
@@ -37,10 +91,13 @@ export default function HostPage() {
   const socket = connection?.socket ?? null;
   const connected = connection?.connected ?? false;
   const [creating, setCreating] = useState(false);
+  const [reclaiming, setReclaiming] = useState(false);
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const lobbyRef = useRef<LobbyState | null>(null);
   const hostingRef = useRef(false);
+  const reclaimingRef = useRef(false);
+  const resumeAttemptRef = useRef<string | null>(null);
 
   useEffect(() => {
     lobbyRef.current = lobby;
@@ -68,9 +125,22 @@ export default function HostPage() {
       return;
     }
 
+    const onHostReady = (ready: HostReadyPayload) => {
+      writeHostSession({ pin: ready.pin, token: ready.token });
+      hostingRef.current = true;
+    };
+
     const onDisconnect = () => {
-      hostingRef.current = false;
       setCreating(false);
+      if (lobbyRef.current && readHostSession()) {
+        reclaimingRef.current = true;
+        setReclaiming(true);
+        return;
+      }
+
+      hostingRef.current = false;
+      reclaimingRef.current = false;
+      setReclaiming(false);
       if (lobbyRef.current) {
         setNotice("The connection dropped and the room was closed.");
       }
@@ -82,6 +152,8 @@ export default function HostPage() {
         return;
       }
       setCreating(false);
+      reclaimingRef.current = false;
+      setReclaiming(false);
       setNotice(null);
       setLobby({ pin: state.pin, players: state.players });
     };
@@ -89,21 +161,54 @@ export default function HostPage() {
     const onHostError = (error: HostErrorPayload) => {
       setCreating(false);
       setNotice(error.message);
-      if (!lobbyRef.current) {
+      if (!lobbyRef.current || reclaimingRef.current) {
+        clearHostSession();
         hostingRef.current = false;
+        reclaimingRef.current = false;
+        setReclaiming(false);
+        setLobby(null);
       }
     };
 
     socket.on("disconnect", onDisconnect);
+    socket.on("host:ready", onHostReady);
     socket.on("lobby:update", onLobbyUpdate);
     socket.on("host:error", onHostError);
 
     return () => {
       socket.off("disconnect", onDisconnect);
+      socket.off("host:ready", onHostReady);
       socket.off("lobby:update", onLobbyUpdate);
       socket.off("host:error", onHostError);
     };
   }, [socket]);
+
+  useEffect(() => {
+    if (!socket || !connected) {
+      resumeAttemptRef.current = null;
+      return;
+    }
+
+    const session = readHostSession();
+    if (!session) {
+      return;
+    }
+
+    const attemptKey = `${session.pin}:${session.token}`;
+    if (resumeAttemptRef.current === attemptKey) {
+      return;
+    }
+
+    if (lobbyRef.current && !reclaimingRef.current) {
+      return;
+    }
+
+    resumeAttemptRef.current = attemptKey;
+    hostingRef.current = true;
+    reclaimingRef.current = true;
+    setReclaiming(true);
+    socket.emit("host:resume", session);
+  }, [connected, socket]);
 
   const createRoom = useCallback(() => {
     if (!socket || !socket.connected) {
@@ -133,6 +238,11 @@ export default function HostPage() {
             <p className="mt-4 max-w-md text-lg text-pretty text-foreground">
               Players enter this PIN to join.
             </p>
+            {reclaiming ? (
+              <p role="status" className="mt-4 text-sm text-muted">
+                Reconnecting…
+              </p>
+            ) : null}
           </div>
 
           <section aria-labelledby="players-heading" className="w-full">
@@ -166,6 +276,15 @@ export default function HostPage() {
               Start game – coming soon
             </button>
           </div>
+        </div>
+      ) : reclaiming ? (
+        <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
+          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+            Reconnecting
+          </h1>
+          <p role="status" className="mt-4 max-w-md text-lg text-pretty text-foreground">
+            Reconnecting to your room…
+          </p>
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">

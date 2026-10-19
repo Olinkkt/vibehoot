@@ -61,4 +61,30 @@ describe("host create limiter", () => {
     limiter.forget("missing");
     assert.deepEqual(limiter.sizes(), { timestamps: 1, sockets: 1, ips: 1 });
   });
+
+  it("keeps the IP cap while a cooldown timestamp is cleared and moved", () => {
+    const limiter = createCreateLimiter({
+      cooldownMs: 1_000,
+      maxPerIp: 1,
+      now: () => 1_000,
+    });
+
+    assert.equal(limiter.tryAcquire("old", "10.0.0.1").ok, true);
+    limiter.clearCooldown("old");
+    assert.deepEqual(limiter.sizes(), { timestamps: 0, sockets: 1, ips: 1 });
+    assert.deepEqual(limiter.tryAcquire("other", "10.0.0.1"), {
+      ok: false,
+      message: HOST_ERRORS.tooMany,
+    });
+
+    limiter.reassign("old", "new");
+    assert.deepEqual(limiter.sizes(), { timestamps: 0, sockets: 1, ips: 1 });
+    assert.deepEqual(limiter.tryAcquire("other", "10.0.0.1"), {
+      ok: false,
+      message: HOST_ERRORS.tooMany,
+    });
+
+    limiter.release("new");
+    assert.deepEqual(limiter.tryAcquire("other", "10.0.0.1"), { ok: true, reserved: true });
+  });
 });

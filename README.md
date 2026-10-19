@@ -14,6 +14,8 @@ npm run dev
 - Host: [http://localhost:3000/host](http://localhost:3000/host)
 - Players: [http://localhost:3000](http://localhost:3000)
 
+Reloading the host page asks for confirmation. If the host reloads anyway, or the connection drops, the room stays open for 12 seconds. The host page keeps a host token in `sessionStorage` and, on reconnect, reclaims the same PIN and player list. Players see "The room was closed" only if the host does not come back in that time.
+
 ## Production
 
 ```bash

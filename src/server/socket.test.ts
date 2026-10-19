@@ -6,13 +6,14 @@ import { io as ioClient, type Socket } from "socket.io-client";
 import type {
   ClientToServerEvents,
   HostErrorPayload,
+  HostReadyPayload,
   LobbyUpdate,
   ServerToClientEvents,
 } from "../shared/events";
 import { HOST_ERRORS, JOIN_ERRORS } from "../shared/validation";
 import { createCreateLimiter, type CreateLimiter } from "./rate-limit";
 import { NO_FREE_PIN_MESSAGE, createRoomStore, type RoomStore } from "./rooms";
-import { attachGameServer } from "./socket";
+import { attachGameServer, type AttachOptions } from "./socket";
 
 type TestClient = Socket<ServerToClientEvents, ClientToServerEvents>;
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -74,10 +75,11 @@ async function withServer(
   store: RoomStore,
   run: (port: number, io: GameServer) => Promise<void>,
   limiter?: CreateLimiter,
+  options?: AttachOptions,
 ): Promise<void> {
   const httpServer = createServer();
   const io: GameServer = new Server(httpServer);
-  attachGameServer(io, store, limiter);
+  attachGameServer(io, store, limiter, options);
   await new Promise<void>((resolve) => {
     httpServer.listen(0, "127.0.0.1", () => {
       resolve();
@@ -160,6 +162,15 @@ describe("game socket", () => {
       disconnect() {
         return { type: "none" };
       },
+      suspendHost() {
+        return { type: "none" };
+      },
+      resumeHost() {
+        return { ok: false, message: HOST_ERRORS.roomGone };
+      },
+      expireHost() {
+        return { type: "none" };
+      },
       getRoom() {
         return null;
       },
@@ -229,7 +240,131 @@ describe("game socket", () => {
       host.disconnect();
       await closed;
       assert.equal(io.sockets.sockets.get(socketId(player))?.rooms.has("room:8463"), false);
-    });
+      assert.equal(store.getRoom("8463"), null);
+    }, undefined, { graceMs: 40 });
+  });
+
+  it("lets the same host reclaim the room during the grace period", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: () => 4242 });
+
+    await withServer(
+      store,
+      async (port) => {
+        const host = await connect(port);
+        const player = await connect(port);
+        openClients.push(host, player);
+
+        const ready = waitFor<HostReadyPayload>(host, "host:ready");
+        const created = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        const credentials = await ready;
+        assert.equal((await created).pin, "4242");
+        assert.equal(credentials.pin, "4242");
+        assert.match(credentials.token, /^[a-f0-9]{32}$/);
+
+        const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+        player.emit("player:join", { pin: "4242", nickname: "Ada" });
+        await joined;
+
+        let closed = false;
+        player.on("room:closed", () => {
+          closed = true;
+        });
+
+        host.disconnect();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        assert.equal(closed, false);
+        assert.equal(store.getRoom("4242")?.players[0]?.nickname, "Ada");
+
+        const nextHost = await connect(port);
+        openClients.push(nextHost);
+        const resumedReady = waitFor<HostReadyPayload>(nextHost, "host:ready");
+        const resumedLobby = waitFor<LobbyUpdate>(nextHost, "lobby:update");
+        nextHost.emit("host:resume", { pin: credentials.pin, token: credentials.token });
+        assert.equal((await resumedReady).token, credentials.token);
+        const lobby = await resumedLobby;
+        assert.equal(lobby.pin, "4242");
+        assert.deepEqual(
+          lobby.players.map((entry) => entry.nickname),
+          ["Ada"],
+        );
+        assert.equal(store.getRoom("4242")?.hostSocketId, socketId(nextHost));
+
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        assert.equal(closed, false);
+      },
+      undefined,
+      { graceMs: 400 },
+    );
+  });
+
+  it("closes the room when the host does not return within the grace period", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: () => 5150 });
+
+    await withServer(
+      store,
+      async (port, io) => {
+        const host = await connect(port);
+        const player = await connect(port);
+        openClients.push(host, player);
+
+        const created = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        await created;
+
+        const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+        player.emit("player:join", { pin: "5150", nickname: "Ada" });
+        await joined;
+
+        const closed = waitFor<undefined>(player, "room:closed");
+        host.disconnect();
+        await closed;
+        assert.equal(store.getRoom("5150"), null);
+        assert.equal(io.sockets.sockets.get(socketId(player))?.rooms.has("room:5150"), false);
+
+        const late = await connect(port);
+        openClients.push(late);
+        const error = waitFor<HostErrorPayload>(late, "host:error");
+        late.emit("host:resume", { pin: "5150", token: "ab".repeat(16) });
+        assert.equal((await error).message, HOST_ERRORS.roomGone);
+      },
+      undefined,
+      { graceMs: 40 },
+    );
+  });
+
+  it("rejects a resume with the wrong host token", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: () => 6161 });
+
+    await withServer(
+      store,
+      async (port) => {
+        const host = await connect(port);
+        const player = await connect(port);
+        openClients.push(host, player);
+
+        const ready = waitFor<HostReadyPayload>(host, "host:ready");
+        const created = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        const credentials = await ready;
+        await created;
+
+        const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+        player.emit("player:join", { pin: "6161", nickname: "Ada" });
+        await joined;
+
+        host.disconnect();
+        const nextHost = await connect(port);
+        openClients.push(nextHost);
+        const error = waitFor<HostErrorPayload>(nextHost, "host:error");
+        nextHost.emit("host:resume", { pin: credentials.pin, token: "cd".repeat(16) });
+        assert.equal((await error).message, HOST_ERRORS.roomGone);
+        assert.equal(store.getRoom("6161")?.players[0]?.nickname, "Ada");
+        assert.equal(store.getRoom("6161")?.hostSocketId, "");
+      },
+      undefined,
+      { graceMs: 5_000 },
+    );
   });
 
   it("removes players from the previous channel when the host creates again", { timeout: 5000 }, async () => {
