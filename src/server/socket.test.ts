@@ -26,7 +26,7 @@ function pins(...values: number[]): () => number {
   };
 }
 
-function waitFor<T>(socket: TestClient, event: string): Promise<T> {
+function waitFor<T>(socket: TestClient, event: keyof ServerToClientEvents): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`timed out waiting for ${event}`));
@@ -36,6 +36,14 @@ function waitFor<T>(socket: TestClient, event: string): Promise<T> {
       resolve(args[0] as T);
     });
   });
+}
+
+function socketId(socket: TestClient): string {
+  const id = socket.id;
+  if (!id) {
+    throw new Error("socket is not connected");
+  }
+  return id;
 }
 
 function connect(port: number): Promise<TestClient> {
@@ -135,8 +143,8 @@ describe("game socket", () => {
         ["H2AsPlayer"],
       );
       assert.equal(store.getRoom("1111"), null);
-      assert.equal(io.sockets.sockets.get(quinn.id)?.rooms.has("room:1111"), false);
-      assert.equal(io.sockets.sockets.get(hostA.id)?.rooms.has("room:1111"), false);
+      assert.equal(io.sockets.sockets.get(socketId(quinn))?.rooms.has("room:1111"), false);
+      assert.equal(io.sockets.sockets.get(socketId(hostA))?.rooms.has("room:1111"), false);
       assert.equal(store.join("1111", "Late", "player-late").ok, false);
     });
   });
@@ -189,7 +197,7 @@ describe("game socket", () => {
         const cooled = waitFor<HostErrorPayload>(first, "host:error");
         first.emit("host:create");
         assert.equal((await cooled).message, HOST_ERRORS.tooFast);
-        assert.equal(store.getRoom("4444")?.hostSocketId, first.id);
+        assert.equal(store.getRoom("4444")?.hostSocketId, socketId(first));
 
         const capped = waitFor<HostErrorPayload>(second, "host:error");
         second.emit("host:create");
@@ -215,12 +223,12 @@ describe("game socket", () => {
       const joined = waitFor<LobbyUpdate>(player, "lobby:update");
       player.emit("player:join", { pin: "8463", nickname: "Ada" });
       await joined;
-      assert.equal(io.sockets.sockets.get(player.id)?.rooms.has("room:8463"), true);
+      assert.equal(io.sockets.sockets.get(socketId(player))?.rooms.has("room:8463"), true);
 
       const closed = waitFor<undefined>(player, "room:closed");
       host.disconnect();
       await closed;
-      assert.equal(io.sockets.sockets.get(player.id)?.rooms.has("room:8463"), false);
+      assert.equal(io.sockets.sockets.get(socketId(player))?.rooms.has("room:8463"), false);
     });
   });
 
@@ -248,9 +256,9 @@ describe("game socket", () => {
         host.emit("host:create");
         await closed;
         assert.equal((await nextLobby).pin, "2468");
-        assert.equal(io.sockets.sockets.get(player.id)?.rooms.has("room:1322"), false);
-        assert.equal(io.sockets.sockets.get(host.id)?.rooms.has("room:1322"), false);
-        assert.equal(io.sockets.sockets.get(host.id)?.rooms.has("room:2468"), true);
+        assert.equal(io.sockets.sockets.get(socketId(player))?.rooms.has("room:1322"), false);
+        assert.equal(io.sockets.sockets.get(socketId(host))?.rooms.has("room:1322"), false);
+        assert.equal(io.sockets.sockets.get(socketId(host))?.rooms.has("room:2468"), true);
       },
       limiter,
     );

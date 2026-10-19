@@ -31,7 +31,7 @@ npm start
 - `src/app/page.tsx` — player join page
 - `src/app/host/page.tsx` — host lobby
 
-Room rules are covered by `npm test`.
+Room rules are covered by `npm test`. `npm run lint` checks the source, and `npm run typecheck` generates Next.js route types and then runs `tsc --noEmit`.
 
 ## Configuration
 
