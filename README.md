@@ -35,6 +35,10 @@ Room rules are covered by `npm test`.
 
 ## Configuration
 
+`PORT` (default `3000`) is the HTTP port.
+
+`HOST` sets the bind address. Leave it unset to listen on every interface, which is what you want when players join from phones on the same network. The startup log then lists those LAN addresses next to `http://localhost:<port>`. Set `HOST=127.0.0.1` to accept connections from this machine only.
+
 `HOST_CREATE_COOLDOWN_MS` (default `1000`) is the minimum time between room creates on one connection. `HOST_CREATE_MAX_PER_IP` (default `20`) is how many rooms one client address can have open. The cap uses the socket's remote address. When every PIN is already taken, the host gets an error instead of staying on "Creating room…".
 
 `ALLOWED_ORIGINS` is an optional comma-separated list of extra browser origins allowed to open a Socket.io connection, for example `https://quiz.example.com`. A connection is allowed when its `Origin` host matches the request `Host`, when that origin is in the list, or when the request has no `Origin` header (non-browser clients). Other origins are refused.
