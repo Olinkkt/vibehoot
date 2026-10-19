@@ -3,6 +3,7 @@ import { parse } from "node:url";
 import next from "next";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "./src/shared/events";
+import { socketAllowRequest } from "./src/server/origin";
 import { attachGameServer } from "./src/server/socket";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -20,7 +21,9 @@ const httpServer = createServer((request, response) => {
 const app = next({ dev, hostname, port, httpServer });
 const handle = app.getRequestHandler();
 
-const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
+const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+  allowRequest: socketAllowRequest,
+});
 attachGameServer(io);
 
 io.engine.on("connection_error", (error: unknown) => {
