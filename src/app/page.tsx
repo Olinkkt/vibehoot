@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useEffectEvent, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent } from "react";
 import { useSocket } from "@/lib/socket";
 import type { JoinErrorPayload, LobbyUpdate } from "@/shared/events";
 import {
   JOIN_ERRORS,
   NICKNAME_MAX_LENGTH,
   PIN_LENGTH,
+  capNicknameDraft,
   nicknameLength,
   normalizeNickname,
   normalizePin,
@@ -52,9 +53,12 @@ export default function JoinPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [joining, setJoining] = useState(false);
   const [joinedName, setJoinedName] = useState("");
+  const joinedPinRef = useRef<string | null>(null);
+  const pinInputRef = useRef<HTMLInputElement>(null);
+  const [pinFocusKey, setPinFocusKey] = useState(0);
 
   const onLobbyUpdate = useEffectEvent((state: LobbyUpdate) => {
-    if (phase === "closed") {
+    if (phase === "closed" || (joinedPinRef.current !== null && state.pin !== joinedPinRef.current)) {
       return;
     }
 
@@ -77,6 +81,7 @@ export default function JoinPage() {
   });
 
   const onRoomClosed = useEffectEvent(() => {
+    joinedPinRef.current = null;
     setJoining(false);
     setPhase("closed");
   });
@@ -84,6 +89,7 @@ export default function JoinPage() {
   const onDisconnect = useEffectEvent(() => {
     setJoining(false);
     if (phase === "waiting") {
+      joinedPinRef.current = null;
       setErrors({ form: "You were disconnected. Join again." });
       setPhase("form");
     }
@@ -146,6 +152,7 @@ export default function JoinPage() {
         return;
       }
 
+      joinedPinRef.current = normalizedPin;
       setJoining(true);
       socket.emit("player:join", { pin: normalizedPin, nickname });
     },
@@ -153,28 +160,40 @@ export default function JoinPage() {
   );
 
   const joinAnother = useCallback(() => {
+    joinedPinRef.current = null;
+    setPin("");
     setPhase("form");
     setJoining(false);
     setErrors({});
+    setPinFocusKey((key) => key + 1);
   }, []);
 
+  useEffect(() => {
+    if (pinFocusKey === 0) {
+      return;
+    }
+    pinInputRef.current?.focus();
+  }, [pinFocusKey]);
+
   const nicknameCount = nicknameLength(normalizeNickname(nickname));
+  const nicknameOverLimit = nicknameCount > NICKNAME_MAX_LENGTH;
+  const nicknameError = nicknameOverLimit ? JOIN_ERRORS.nicknameTooLong : errors.nickname;
   const nicknameDescribedBy = [
     "nickname-count",
-    errors.nickname ? "nickname-error" : null,
+    nicknameError ? "nickname-error" : null,
   ]
     .filter((id): id is string => id !== null)
     .join(" ");
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4 py-8">
-      <p className="text-sm font-semibold tracking-tight">Slophoot</p>
+      <p className="text-xl font-semibold tracking-tight sm:text-3xl">Slophoot</p>
 
       {phase === "waiting" ? (
         <div className="mt-10">
           <h1 className="text-4xl font-semibold tracking-tight text-balance">{"You're in!"}</h1>
           <p role="status" className="mt-4 text-lg">
-            Waiting for the host...
+            Waiting for the host…
           </p>
           <p className="mt-6 text-sm text-muted">
             Joined as <span className="font-semibold text-foreground">{joinedName}</span>
@@ -210,6 +229,7 @@ export default function JoinPage() {
                 PIN
               </label>
               <input
+                ref={pinInputRef}
                 id="pin"
                 name="pin"
                 value={pin}
@@ -245,7 +265,7 @@ export default function JoinPage() {
                 name="nickname"
                 value={nickname}
                 onChange={(event) => {
-                  setNickname(event.target.value.slice(0, 40));
+                  setNickname(capNicknameDraft(event.target.value));
                   setErrors((current) =>
                     current.nickname ? { ...current, nickname: undefined } : current,
                   );
@@ -253,24 +273,30 @@ export default function JoinPage() {
                 autoComplete="nickname"
                 autoCapitalize="words"
                 enterKeyHint="go"
-                maxLength={40}
-                aria-invalid={errors.nickname ? true : undefined}
+                aria-invalid={nicknameError ? true : undefined}
                 aria-describedby={nicknameDescribedBy}
-                className={fieldClassName}
+                className={`${fieldClassName}${nicknameOverLimit ? " border-red-800" : ""}`}
               />
-              <p id="nickname-count" className="mt-2 text-sm text-muted tabular-nums">
+              <p
+                id="nickname-count"
+                className={`mt-2 text-sm tabular-nums ${nicknameOverLimit ? "font-medium text-red-800" : "text-muted"}`}
+              >
                 {nicknameCount} / {NICKNAME_MAX_LENGTH}
               </p>
-              {errors.nickname ? (
-                <p id="nickname-error" role="alert" className="mt-2 text-sm font-medium text-red-800">
-                  {errors.nickname}
+              {nicknameError ? (
+                <p
+                  id="nickname-error"
+                  role={errors.nickname ? "alert" : undefined}
+                  className="mt-2 text-sm font-medium text-red-800"
+                >
+                  {nicknameError}
                 </p>
               ) : null}
             </div>
 
             <button
               type="submit"
-              disabled={!connected || joining}
+              disabled={!connected || joining || nicknameOverLimit}
               className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-5 text-base font-semibold text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-700"
             >
               {joining ? "Joining…" : "Join"}

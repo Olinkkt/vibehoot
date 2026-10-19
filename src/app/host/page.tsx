@@ -4,7 +4,7 @@ import { Play, Users } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSocket } from "@/lib/socket";
-import type { LobbyPlayer, LobbyUpdate } from "@/shared/events";
+import type { HostErrorPayload, LobbyPlayer, LobbyUpdate } from "@/shared/events";
 
 type LobbyState = {
   pin: string;
@@ -16,14 +16,14 @@ function PinDigits({ pin }: { pin: string }) {
 
   return (
     <p
-      className="mt-3 flex justify-center gap-[0.06em] font-scoreboard text-[clamp(5.5rem,16vw,11rem)] leading-none font-semibold text-foreground"
+      className="mt-4 flex justify-center gap-[0.08em] font-scoreboard text-[clamp(5.5rem,18vw,8rem)] leading-none font-semibold text-foreground sm:gap-[0.15em] sm:text-[clamp(7.5rem,14vw,15rem)]"
       aria-label={`Game PIN ${digits.join(" ")}`}
     >
       {digits.map((digit, index) => (
         <span
           key={`${pin}-${index.toString()}`}
           aria-hidden="true"
-          className="inline-block min-w-[0.72em] text-center"
+          className="inline-block min-w-[0.72em] text-center sm:min-w-[0.9em]"
         >
           {digit}
         </span>
@@ -44,6 +44,23 @@ export default function HostPage() {
 
   useEffect(() => {
     lobbyRef.current = lobby;
+  }, [lobby]);
+
+  useEffect(() => {
+    if (!lobby) {
+      return;
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Current browsers show a generic prompt and ignore custom copy.
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
   }, [lobby]);
 
   useEffect(() => {
@@ -69,12 +86,22 @@ export default function HostPage() {
       setLobby({ pin: state.pin, players: state.players });
     };
 
+    const onHostError = (error: HostErrorPayload) => {
+      setCreating(false);
+      setNotice(error.message);
+      if (!lobbyRef.current) {
+        hostingRef.current = false;
+      }
+    };
+
     socket.on("disconnect", onDisconnect);
     socket.on("lobby:update", onLobbyUpdate);
+    socket.on("host:error", onHostError);
 
     return () => {
       socket.off("disconnect", onDisconnect);
       socket.off("lobby:update", onLobbyUpdate);
+      socket.off("host:error", onHostError);
     };
   }, [socket]);
 
@@ -92,7 +119,7 @@ export default function HostPage() {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-6 py-8">
       <header className="flex items-center justify-between">
-        <p className="text-sm font-semibold tracking-tight">Slophoot</p>
+        <p className="text-xl font-semibold tracking-tight sm:text-3xl">Slophoot</p>
         <p className="text-sm font-medium text-muted">Host</p>
       </header>
 
@@ -133,15 +160,11 @@ export default function HostPage() {
             <button
               type="button"
               disabled
-              aria-describedby="start-game-hint"
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-zinc-200 px-6 text-base font-semibold text-zinc-700 sm:w-auto"
             >
               <Play aria-hidden="true" className="size-5" strokeWidth={2.25} />
-              Start game
+              Start game – coming soon
             </button>
-            <p id="start-game-hint" className="text-sm text-muted">
-              Starting the game is not available yet.
-            </p>
           </div>
         </div>
       ) : (

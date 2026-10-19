@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoomStore } from "./rooms";
-import { JOIN_ERRORS } from "../shared/validation";
+import {
+  JOIN_ERRORS,
+  NICKNAME_DRAFT_CAP,
+  NICKNAME_MAX_LENGTH,
+  capNicknameDraft,
+  nicknameLength,
+  normalizeNickname,
+} from "../shared/validation";
 
 function pins(...values: number[]): () => number {
   let index = 0;
@@ -24,10 +31,27 @@ describe("room store", () => {
     assert.equal(store.getRoom("0007")?.hostSocketId, "host-1");
   });
 
-  it("throws when every PIN attempt is taken", () => {
+  it("scans for a free PIN when random draws collide", () => {
     const store = createRoomStore({ randomPin: () => 1 });
-    store.createRoom("host-1");
-    assert.throws(() => store.createRoom("host-2"), /No free room PIN/);
+    const first = store.createRoom("host-1");
+    const second = store.createRoom("host-2");
+
+    assert.equal(first.room.pin, "0001");
+    assert.equal(second.room.pin, "0000");
+  });
+
+  it("throws when no PIN remains and keeps the caller's current room", () => {
+    let next = 0;
+    const store = createRoomStore({ randomPin: () => next++ });
+    store.createRoom("host-keep");
+
+    for (let index = 1; index < 10_000; index += 1) {
+      store.createRoom(`host-${index.toString()}`);
+    }
+
+    assert.throws(() => store.createRoom("host-keep"), /No free room PIN/);
+    assert.equal(store.getRoom("0000")?.hostSocketId, "host-keep");
+    assert.equal(store.getRoom("9999")?.hostSocketId, "host-9999");
   });
 
   it("replaces the previous room when the same host creates again", () => {
@@ -108,5 +132,96 @@ describe("room store", () => {
     assert.deepEqual(store.disconnect("host"), { type: "room_closed", pin: "0077" });
     assert.equal(store.getRoom("0077"), null);
     assert.deepEqual(store.disconnect("p2"), { type: "none" });
+  });
+
+  it("closes the hosted room when that host joins another room as a player", () => {
+    const store = createRoomStore({ randomPin: pins(1111, 2222) });
+    store.createRoom("host-a");
+    store.join("1111", "Quinn", "player-q");
+    store.createRoom("host-b");
+
+    const rejected = store.join("2222", "   ", "host-a");
+    assert.equal(rejected.ok, false);
+    assert.equal(store.getRoom("1111")?.hostSocketId, "host-a");
+
+    const joined = store.join("2222", "H2AsPlayer", "host-a");
+    assert.equal(joined.ok, true);
+    if (joined.ok) {
+      assert.equal(joined.closedPin, "1111");
+      assert.deepEqual(
+        joined.room.players.map((player) => player.nickname),
+        ["H2AsPlayer"],
+      );
+    }
+
+    assert.equal(store.getRoom("1111"), null);
+    assert.equal(store.join("1111", "Late", "player-late").ok, false);
+    assert.deepEqual(store.disconnect("player-q"), { type: "none" });
+    assert.deepEqual(store.disconnect("host-a"), {
+      type: "player_left",
+      room: store.getRoom("2222"),
+    });
+  });
+
+  it("counts nickname drafts in code points and keeps input past 20 characters", () => {
+    const twentyEmoji = "😀".repeat(NICKNAME_MAX_LENGTH);
+    const twentyOneEmoji = "😀".repeat(NICKNAME_MAX_LENGTH + 1);
+    assert.equal(capNicknameDraft(twentyEmoji), twentyEmoji);
+    assert.equal(capNicknameDraft(twentyOneEmoji), twentyOneEmoji);
+    assert.equal(nicknameLength(normalizeNickname(capNicknameDraft(twentyOneEmoji))), 21);
+    assert.equal(capNicknameDraft("a".repeat(25)), "a".repeat(25));
+
+    const capped = capNicknameDraft("😀".repeat(NICKNAME_DRAFT_CAP + 5));
+    assert.equal(nicknameLength(capped), NICKNAME_DRAFT_CAP);
+    assert.equal(capped.length, NICKNAME_DRAFT_CAP * 2);
+  });
+
+  it("strips format characters before the duplicate and empty checks", () => {
+    assert.equal(normalizeNickname("Ada\u200B"), "Ada");
+    assert.equal(normalizeNickname("\u200B"), "");
+    assert.equal(normalizeNickname("\u202Eevil"), "evil");
+    assert.equal(normalizeNickname("Ada\u200B  Lovelace"), "Ada Lovelace");
+    assert.equal(normalizeNickname("Ａｄａ"), "Ada");
+
+    const store = createRoomStore({ randomPin: () => 42 });
+    store.createRoom("host");
+    store.join("0042", "Ada", "p1");
+
+    assert.deepEqual(store.join("0042", "Ada\u200B", "p2"), {
+      ok: false,
+      message: JOIN_ERRORS.duplicateNickname,
+    });
+    assert.deepEqual(store.join("0042", "\u200B", "p3"), {
+      ok: false,
+      message: JOIN_ERRORS.emptyNickname,
+    });
+    assert.deepEqual(store.join("0042", "\u202EAda", "p4"), {
+      ok: false,
+      message: JOIN_ERRORS.duplicateNickname,
+    });
+    assert.deepEqual(store.join("0042", "Ａｄａ", "p5"), {
+      ok: false,
+      message: JOIN_ERRORS.duplicateNickname,
+    });
+
+    const joined = store.join("0042", "\u202Eevil", "p6");
+    assert.equal(joined.ok, true);
+    if (joined.ok) {
+      assert.equal(joined.room.players.at(-1)?.nickname, "evil");
+    }
+    assert.equal(store.getRoom("0042")?.players.length, 2);
+  });
+
+  it("rejects a host joining their own room and keeps them as host", () => {
+    const store = createRoomStore({ randomPin: () => 3333 });
+    store.createRoom("host-a");
+    store.join("3333", "Quinn", "player-q");
+
+    assert.deepEqual(store.join("3333", "Host", "host-a"), {
+      ok: false,
+      message: JOIN_ERRORS.invalidRequest,
+    });
+    assert.equal(store.getRoom("3333")?.hostSocketId, "host-a");
+    assert.deepEqual(store.disconnect("host-a"), { type: "room_closed", pin: "3333" });
   });
 });

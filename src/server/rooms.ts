@@ -23,6 +23,8 @@ export type JoinSuccess = {
   ok: true;
   room: Room;
   previousRoom: Room | null;
+  /** Set when this socket was hosting another room that had to be closed. */
+  closedPin: string | null;
 };
 
 export type JoinFailure = {
@@ -42,6 +44,9 @@ type Membership =
   | { role: "player"; pin: string };
 
 const PIN_ATTEMPTS = 50;
+const PIN_SPACE = 10_000;
+
+export const NO_FREE_PIN_MESSAGE = "No free room PIN is available.";
 
 export type RoomStore = {
   createRoom: (hostSocketId: string) => { room: Room; displaced: DisconnectResult };
@@ -118,22 +123,31 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     return { type: "player_left", room };
   }
 
-  function createRoom(hostSocketId: string): { room: Room; displaced: DisconnectResult } {
-    const displaced = disconnect(hostSocketId);
-    let pin: string | null = null;
-
+  function allocatePin(): string | null {
     for (let attempt = 0; attempt < PIN_ATTEMPTS; attempt += 1) {
       const candidate = String(randomPin()).padStart(PIN_LENGTH, "0");
       if (candidate.length === PIN_LENGTH && !rooms.has(candidate)) {
-        pin = candidate;
-        break;
+        return candidate;
       }
     }
 
-    if (!pin) {
-      throw new Error("No free room PIN is available.");
+    for (let value = 0; value < PIN_SPACE; value += 1) {
+      const candidate = String(value).padStart(PIN_LENGTH, "0");
+      if (!rooms.has(candidate)) {
+        return candidate;
+      }
     }
 
+    return null;
+  }
+
+  function createRoom(hostSocketId: string): { room: Room; displaced: DisconnectResult } {
+    const pin = allocatePin();
+    if (!pin) {
+      throw new Error(NO_FREE_PIN_MESSAGE);
+    }
+
+    const displaced = disconnect(hostSocketId);
     const room: Room = { pin, hostSocketId, players: [] };
     rooms.set(pin, room);
     membership.set(hostSocketId, { role: "host", pin });
@@ -174,7 +188,11 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     }
 
     let previousRoom: Room | null = null;
-    if (current?.role === "player" && current.pin !== room.pin) {
+    let closedPin: string | null = null;
+    if (current?.role === "host" && current.pin !== room.pin) {
+      closedPin = current.pin;
+      deleteRoom(current.pin);
+    } else if (current?.role === "player" && current.pin !== room.pin) {
       previousRoom = removePlayer(current.pin, socketId);
     }
 
@@ -188,7 +206,7 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
       membership.set(socketId, { role: "player", pin: room.pin });
     }
 
-    return { ok: true, room: snapshot(room), previousRoom };
+    return { ok: true, room: snapshot(room), previousRoom, closedPin };
   }
 
   function getRoom(pin: string): Room | null {

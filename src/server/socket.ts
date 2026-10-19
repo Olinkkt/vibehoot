@@ -5,8 +5,15 @@ import type {
   PlayerJoinPayload,
   ServerToClientEvents,
 } from "../shared/events";
-import { JOIN_ERRORS } from "../shared/validation";
-import { createRoomStore, type DisconnectResult, type Room } from "./rooms";
+import { HOST_ERRORS, JOIN_ERRORS } from "../shared/validation";
+import { createCreateLimiter, type CreateLimiter } from "./rate-limit";
+import {
+  NO_FREE_PIN_MESSAGE,
+  createRoomStore,
+  type DisconnectResult,
+  type Room,
+  type RoomStore,
+} from "./rooms";
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -33,14 +40,20 @@ function isJoinPayload(payload: unknown): payload is PlayerJoinPayload {
   return typeof record.pin === "string" && typeof record.nickname === "string";
 }
 
+function closeChannel(io: GameServer, pin: string, except?: GameSocket): void {
+  const roomChannel = channel(pin);
+  const target = except ? except.to(roomChannel) : io.to(roomChannel);
+  target.emit("room:closed");
+  io.in(roomChannel).socketsLeave(roomChannel);
+}
+
 function announceDisplacement(
   io: GameServer,
   socket: GameSocket,
   displaced: DisconnectResult,
 ): void {
   if (displaced.type === "room_closed") {
-    socket.to(channel(displaced.pin)).emit("room:closed");
-    void socket.leave(channel(displaced.pin));
+    closeChannel(io, displaced.pin, socket);
     return;
   }
 
@@ -51,13 +64,38 @@ function announceDisplacement(
   }
 }
 
-export function attachGameServer(io: GameServer): void {
+function clientAddress(socket: GameSocket): string {
+  const address = socket.handshake.address.trim();
+  return address.length > 0 ? address : "unknown";
+}
+
+export function attachGameServer(
+  io: GameServer,
+  store: RoomStore = rooms,
+  limiter: CreateLimiter = createCreateLimiter(),
+): void {
   io.on("connection", (socket) => {
     socket.on("host:create", () => {
-      const { room, displaced } = rooms.createRoom(socket.id);
-      announceDisplacement(io, socket, displaced);
-      void socket.join(channel(room.pin));
-      socket.emit("lobby:update", toLobby(room));
+      const decision = limiter.tryAcquire(socket.id, clientAddress(socket));
+      if (!decision.ok) {
+        socket.emit("host:error", { message: decision.message });
+        return;
+      }
+
+      try {
+        const { room, displaced } = store.createRoom(socket.id);
+        announceDisplacement(io, socket, displaced);
+        void socket.join(channel(room.pin));
+        socket.emit("lobby:update", toLobby(room));
+      } catch (error: unknown) {
+        if (decision.reserved) {
+          limiter.release(socket.id);
+        }
+        if (!(error instanceof Error) || error.message !== NO_FREE_PIN_MESSAGE) {
+          console.error("Failed to create room", error);
+        }
+        socket.emit("host:error", { message: HOST_ERRORS.noRooms });
+      }
     });
 
     socket.on("player:join", (payload: PlayerJoinPayload) => {
@@ -66,10 +104,15 @@ export function attachGameServer(io: GameServer): void {
         return;
       }
 
-      const result = rooms.join(payload.pin, payload.nickname, socket.id);
+      const result = store.join(payload.pin, payload.nickname, socket.id);
       if (!result.ok) {
         socket.emit("join:error", { message: result.message });
         return;
+      }
+
+      if (result.closedPin) {
+        limiter.release(socket.id);
+        closeChannel(io, result.closedPin, socket);
       }
 
       if (result.previousRoom) {
@@ -84,9 +127,10 @@ export function attachGameServer(io: GameServer): void {
     });
 
     socket.on("disconnect", () => {
-      const result = rooms.disconnect(socket.id);
+      const result = store.disconnect(socket.id);
+      limiter.release(socket.id);
       if (result.type === "room_closed") {
-        io.to(channel(result.pin)).emit("room:closed");
+        closeChannel(io, result.pin);
         return;
       }
 

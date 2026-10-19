@@ -1,12 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { networkInterfaces } from "node:os";
 import { parse } from "node:url";
 import next from "next";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "./src/shared/events";
+import { socketAllowRequest } from "./src/server/origin";
 import { attachGameServer } from "./src/server/socket";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOST ?? "localhost";
+const bindHost = process.env.HOST;
+const hostname = bindHost && bindHost.length > 0 ? bindHost : "localhost";
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 
 if (!Number.isInteger(port) || port <= 0) {
@@ -20,7 +23,9 @@ const httpServer = createServer((request, response) => {
 const app = next({ dev, hostname, port, httpServer });
 const handle = app.getRequestHandler();
 
-const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
+const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+  allowRequest: socketAllowRequest,
+});
 attachGameServer(io);
 
 io.engine.on("connection_error", (error: unknown) => {
@@ -44,11 +49,52 @@ async function handleRequest(
   }
 }
 
+function formatHost(host: string): string {
+  if (host.includes(":") && !host.startsWith("[")) {
+    return `[${host}]`;
+  }
+  return host;
+}
+
+function lanAddresses(): string[] {
+  const addresses: string[] = [];
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.internal || entry.family !== "IPv4") {
+        continue;
+      }
+      addresses.push(entry.address);
+    }
+  }
+  return addresses;
+}
+
 void app.prepare().then(() => {
-  httpServer.listen(port, () => {
+  const onListening = () => {
     const mode = dev ? "development" : "production";
+    const shownHost = bindHost && bindHost.length > 0 ? formatHost(bindHost) : "localhost";
     console.log(
-      `> Slophoot ready on http://${hostname}:${port} (${mode}, socket.io attached)`,
+      `> Slophoot ready on http://${shownHost}:${port.toString()} (${mode}, socket.io attached)`,
     );
-  });
+    if (bindHost && bindHost.length > 0) {
+      return;
+    }
+
+    const lan = lanAddresses();
+    if (lan.length === 0) {
+      return;
+    }
+
+    console.log("> Players on this network can open:");
+    for (const address of lan) {
+      console.log(`>   http://${address}:${port.toString()}`);
+    }
+  };
+
+  if (bindHost && bindHost.length > 0) {
+    httpServer.listen(port, bindHost, onListening);
+    return;
+  }
+
+  httpServer.listen(port, onListening);
 });
