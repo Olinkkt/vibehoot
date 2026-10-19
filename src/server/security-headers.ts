@@ -21,5 +21,5 @@ export function applySecurityHeaders(response: ServerResponse): void {
 
 export function isSocketIoRequest(request: IncomingMessage): boolean {
   const path = (request.url ?? "").split("?", 1)[0] ?? "";
-  return path === "/socket.io" || path.startsWith("/socket.io/");
+  return path.startsWith("/socket.io/");
 }
