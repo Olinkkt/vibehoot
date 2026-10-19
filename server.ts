@@ -26,6 +26,9 @@ const handle = app.getRequestHandler();
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   allowRequest: socketAllowRequest,
+  // Drop half-open host sockets in about 15s instead of the 45s engine default.
+  pingInterval: 10_000,
+  pingTimeout: 5_000,
 });
 attachGameServer(io);
 

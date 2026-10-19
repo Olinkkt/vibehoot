@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSocket } from "@/lib/socket";
 import type { HostErrorPayload, HostReadyPayload, LobbyPlayer, LobbyUpdate } from "@/shared/events";
+import { HOST_ERRORS } from "@/shared/validation";
 
 type LobbyState = {
   pin: string;
@@ -17,6 +18,12 @@ type HostSession = {
 };
 
 const HOST_SESSION_KEY = "slophoot-host";
+const RESUME_RETRY_LIMIT = 3;
+const RESUME_RETRY_STEP_MS = 300;
+
+function isTransientHostError(error: HostErrorPayload): boolean {
+  return error.code === "transient" || error.code === undefined;
+}
 
 function readHostSession(): HostSession | null {
   try {
@@ -98,6 +105,8 @@ export default function HostPage() {
   const hostingRef = useRef(false);
   const reclaimingRef = useRef(false);
   const resumeAttemptRef = useRef<string | null>(null);
+  const resumeTriesRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     lobbyRef.current = lobby;
@@ -125,12 +134,20 @@ export default function HostPage() {
       return;
     }
 
+    const clearRetryTimer = () => {
+      if (retryTimerRef.current !== null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+
     const onHostReady = (ready: HostReadyPayload) => {
       writeHostSession({ pin: ready.pin, token: ready.token });
       hostingRef.current = true;
     };
 
     const onDisconnect = () => {
+      clearRetryTimer();
       setCreating(false);
       if (lobbyRef.current && readHostSession()) {
         reclaimingRef.current = true;
@@ -151,6 +168,8 @@ export default function HostPage() {
       if (!hostingRef.current) {
         return;
       }
+      clearRetryTimer();
+      resumeTriesRef.current = 0;
       setCreating(false);
       reclaimingRef.current = false;
       setReclaiming(false);
@@ -158,14 +177,49 @@ export default function HostPage() {
       setLobby({ pin: state.pin, players: state.players });
     };
 
+    const giveUpReclaim = (message: string) => {
+      clearRetryTimer();
+      resumeTriesRef.current = 0;
+      setNotice(message);
+      clearHostSession();
+      hostingRef.current = false;
+      reclaimingRef.current = false;
+      setReclaiming(false);
+      setLobby(null);
+    };
+
     const onHostError = (error: HostErrorPayload) => {
       setCreating(false);
+      if (reclaimingRef.current && isTransientHostError(error) && resumeTriesRef.current < RESUME_RETRY_LIMIT) {
+        const session = readHostSession();
+        if (session && socket.connected) {
+          resumeTriesRef.current += 1;
+          const delay = RESUME_RETRY_STEP_MS * resumeTriesRef.current;
+          clearRetryTimer();
+          retryTimerRef.current = setTimeout(() => {
+            retryTimerRef.current = null;
+            if (!socket.connected || !reclaimingRef.current) {
+              return;
+            }
+            const latest = readHostSession();
+            if (!latest) {
+              return;
+            }
+            socket.emit("host:resume", latest);
+          }, delay);
+          return;
+        }
+      }
+
+      if (reclaimingRef.current) {
+        giveUpReclaim(HOST_ERRORS.roomGone);
+        return;
+      }
+
       setNotice(error.message);
-      if (!lobbyRef.current || reclaimingRef.current) {
+      if (!lobbyRef.current) {
         clearHostSession();
         hostingRef.current = false;
-        reclaimingRef.current = false;
-        setReclaiming(false);
         setLobby(null);
       }
     };
@@ -176,6 +230,7 @@ export default function HostPage() {
     socket.on("host:error", onHostError);
 
     return () => {
+      clearRetryTimer();
       socket.off("disconnect", onDisconnect);
       socket.off("host:ready", onHostReady);
       socket.off("lobby:update", onLobbyUpdate);
@@ -204,6 +259,7 @@ export default function HostPage() {
     }
 
     resumeAttemptRef.current = attemptKey;
+    resumeTriesRef.current = 0;
     hostingRef.current = true;
     reclaimingRef.current = true;
     setReclaiming(true);
