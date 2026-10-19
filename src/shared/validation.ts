@@ -15,11 +15,16 @@ export const HOST_ERRORS = {
   tooMany: "Too many rooms from this network. Try again later.",
 } as const;
 
-const CONTROL_CHARS = /[\u0000-\u001F\u007F]/g;
+const DISALLOWED_CHARS = /[\p{Cc}\p{Cf}]/gu;
+const INTERNAL_WHITESPACE = /\s+/gu;
 const PIN_PATTERN = /^\d{4}$/;
 
 export function normalizeNickname(value: string): string {
-  return value.normalize("NFKC").replace(CONTROL_CHARS, "").trim();
+  return value
+    .normalize("NFKC")
+    .replace(DISALLOWED_CHARS, "")
+    .replace(INTERNAL_WHITESPACE, " ")
+    .trim();
 }
 
 export function nicknameLength(value: string): number {

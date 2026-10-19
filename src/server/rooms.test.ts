@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoomStore } from "./rooms";
-import { JOIN_ERRORS } from "../shared/validation";
+import { JOIN_ERRORS, normalizeNickname } from "../shared/validation";
 
 function pins(...values: number[]): () => number {
   let index = 0;
@@ -154,6 +154,42 @@ describe("room store", () => {
       type: "player_left",
       room: store.getRoom("2222"),
     });
+  });
+
+  it("strips format characters before the duplicate and empty checks", () => {
+    assert.equal(normalizeNickname("Ada\u200B"), "Ada");
+    assert.equal(normalizeNickname("\u200B"), "");
+    assert.equal(normalizeNickname("\u202Eevil"), "evil");
+    assert.equal(normalizeNickname("Ada\u200B  Lovelace"), "Ada Lovelace");
+    assert.equal(normalizeNickname("Ａｄａ"), "Ada");
+
+    const store = createRoomStore({ randomPin: () => 42 });
+    store.createRoom("host");
+    store.join("0042", "Ada", "p1");
+
+    assert.deepEqual(store.join("0042", "Ada\u200B", "p2"), {
+      ok: false,
+      message: JOIN_ERRORS.duplicateNickname,
+    });
+    assert.deepEqual(store.join("0042", "\u200B", "p3"), {
+      ok: false,
+      message: JOIN_ERRORS.emptyNickname,
+    });
+    assert.deepEqual(store.join("0042", "\u202EAda", "p4"), {
+      ok: false,
+      message: JOIN_ERRORS.duplicateNickname,
+    });
+    assert.deepEqual(store.join("0042", "Ａｄａ", "p5"), {
+      ok: false,
+      message: JOIN_ERRORS.duplicateNickname,
+    });
+
+    const joined = store.join("0042", "\u202Eevil", "p6");
+    assert.equal(joined.ok, true);
+    if (joined.ok) {
+      assert.equal(joined.room.players.at(-1)?.nickname, "evil");
+    }
+    assert.equal(store.getRoom("0042")?.players.length, 2);
   });
 
   it("rejects a host joining their own room and keeps them as host", () => {
