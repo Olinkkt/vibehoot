@@ -5,6 +5,7 @@ import next from "next";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "./src/shared/events";
 import { isAllowedHost, socketAllowRequest } from "./src/server/origin";
+import { applySecurityHeaders, isSocketIoRequest } from "./src/server/security-headers";
 import { attachGameServer } from "./src/server/socket";
 import { startupMessages } from "./src/server/startup-log";
 
@@ -64,6 +65,12 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
+  if (isSocketIoRequest(request)) {
+    return;
+  }
+
+  applySecurityHeaders(response);
+
   try {
     if (!isAllowedHost(requestHost(request))) {
       response.statusCode = 403;

@@ -141,6 +141,14 @@ export default function JoinPage() {
     socket.on("lobby:hostReconnecting", handleHostReconnecting);
     socket.on("lobby:hostReconnected", handleHostReconnected);
 
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && !socket.connected) {
+        socket.connect();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       socket.off("lobby:update", handleLobbyUpdate);
       socket.off("join:error", handleJoinError);
@@ -148,6 +156,7 @@ export default function JoinPage() {
       socket.off("disconnect", handleDisconnect);
       socket.off("lobby:hostReconnecting", handleHostReconnecting);
       socket.off("lobby:hostReconnected", handleHostReconnected);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [socket]);
 

@@ -65,6 +65,7 @@ export type RoomStore = {
   join: (pin: string, nickname: string, socketId: string) => JoinResult;
   disconnect: (socketId: string) => DisconnectResult;
   suspendHost: (socketId: string) => DisconnectResult;
+  leaveHost: (socketId: string) => DisconnectResult;
   resumeHost: (pin: string, token: string, socketId: string) => ResumeResult;
   expireHost: (pin: string) => DisconnectResult;
   isHostAway: (pin: string) => boolean;
@@ -134,6 +135,15 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
   }
 
   function suspendHost(socketId: string): DisconnectResult {
+    return removeMember(socketId, false);
+  }
+
+  function leaveHost(socketId: string): DisconnectResult {
+    const current = membership.get(socketId);
+    if (current?.role !== "host") {
+      return { type: "none" };
+    }
+
     return removeMember(socketId, false);
   }
 
@@ -310,5 +320,15 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     return room ? snapshot(room) : null;
   }
 
-  return { createRoom, join, disconnect, suspendHost, resumeHost, expireHost, isHostAway, getRoom };
+  return {
+    createRoom,
+    join,
+    disconnect,
+    suspendHost,
+    leaveHost,
+    resumeHost,
+    expireHost,
+    isHostAway,
+    getRoom,
+  };
 }
