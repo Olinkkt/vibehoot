@@ -23,6 +23,9 @@ npm run build
 npm start
 ```
 
+For deploying with **Coolify**, see the [Coolify Deployment Guide](COOLIFY.md).
+
+
 ## Folder structure
 
 - `server.ts` — HTTP server, Next.js request handler, and Socket.io
