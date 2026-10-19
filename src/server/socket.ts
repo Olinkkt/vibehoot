@@ -185,6 +185,7 @@ export function attachGameServer(
         limiter.reassign(result.replacedSocketId, socket.id);
         const previous = io.sockets.sockets.get(result.replacedSocketId);
         if (previous && previous.id !== socket.id) {
+          previous.emit("host:replaced");
           previous.disconnect(true);
         }
       }

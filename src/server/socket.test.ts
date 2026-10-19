@@ -418,10 +418,13 @@ describe("game socket", () => {
         });
 
         const nextHost = await connect(port);
-        openClients.push(nextHost);
-        const oldGone = new Promise<void>((resolve) => {
-          host.once("disconnect", () => {
-            resolve();
+        let replacedEventReceived = false;
+        host.once("host:replaced", () => {
+          replacedEventReceived = true;
+        });
+        const oldGone = new Promise<string>((resolve) => {
+          host.once("disconnect", (reason) => {
+            resolve(reason);
           });
         });
         const resumedReady = waitFor<HostReadyPayload>(nextHost, "host:ready");
@@ -432,7 +435,9 @@ describe("game socket", () => {
           (await resumedLobby).players.map((entry) => entry.nickname),
           ["Ada"],
         );
-        await oldGone;
+        const disconnectReason = await oldGone;
+        assert.equal(replacedEventReceived, true);
+        assert.equal(disconnectReason, "io server disconnect");
         assert.equal(host.connected, false);
         assert.equal(store.getRoom("7373")?.hostSocketId, socketId(nextHost));
 
@@ -441,12 +446,40 @@ describe("game socket", () => {
         assert.equal(away, false);
         assert.equal(store.getRoom("7373")?.players[0]?.nickname, "Ada");
 
+        // The replaced host can take the room back with the same credentials
+        const takeBackHost = await connect(port);
+        openClients.push(takeBackHost);
+        let nextHostReplaced = false;
+        nextHost.once("host:replaced", () => {
+          nextHostReplaced = true;
+        });
+        const nextHostGone = new Promise<string>((resolve) => {
+          nextHost.once("disconnect", (reason) => {
+            resolve(reason);
+          });
+        });
+        const takeBackReady = waitFor<HostReadyPayload>(takeBackHost, "host:ready");
+        const takeBackLobby = waitFor<LobbyUpdate>(takeBackHost, "lobby:update");
+        takeBackHost.emit("host:resume", { pin: credentials.pin, token: credentials.token });
+        assert.equal((await takeBackReady).token, credentials.token);
+        assert.deepEqual(
+          (await takeBackLobby).players.map((entry) => entry.nickname),
+          ["Ada"],
+        );
+        const nextDisconnectReason = await nextHostGone;
+        assert.equal(nextHostReplaced, true);
+        assert.equal(nextDisconnectReason, "io server disconnect");
+        assert.equal(nextHost.connected, false);
+        assert.equal(store.getRoom("7373")?.hostSocketId, socketId(takeBackHost));
+        assert.equal(closed, false);
+        assert.equal(away, false);
+
         const third = await connect(port);
         openClients.push(third);
         const capped = waitFor<HostErrorPayload>(third, "host:error");
         third.emit("host:create");
         assert.equal((await capped).message, HOST_ERRORS.tooMany);
-        assert.equal(store.getRoom("7373")?.hostSocketId, socketId(nextHost));
+        assert.equal(store.getRoom("7373")?.hostSocketId, socketId(takeBackHost));
       },
       limiter,
       { graceMs: 80 },

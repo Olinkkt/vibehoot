@@ -47,4 +47,5 @@ export interface ServerToClientEvents {
   "room:closed": () => void;
   "lobby:hostReconnecting": () => void;
   "lobby:hostReconnected": () => void;
+  "host:replaced": () => void;
 }

@@ -99,11 +99,13 @@ export default function HostPage() {
   const connected = connection?.connected ?? false;
   const [creating, setCreating] = useState(false);
   const [reclaiming, setReclaiming] = useState(false);
+  const [replaced, setReplaced] = useState(false);
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const lobbyRef = useRef<LobbyState | null>(null);
   const hostingRef = useRef(false);
   const reclaimingRef = useRef(false);
+  const replacedRef = useRef(false);
   const resumeAttemptRef = useRef<string | null>(null);
   const resumeTriesRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -113,7 +115,11 @@ export default function HostPage() {
   }, [lobby]);
 
   useEffect(() => {
-    if (!lobby) {
+    replacedRef.current = replaced;
+  }, [replaced]);
+
+  useEffect(() => {
+    if (!lobby || replaced) {
       return;
     }
 
@@ -127,7 +133,7 @@ export default function HostPage() {
     return () => {
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [lobby]);
+  }, [lobby, replaced]);
 
   useEffect(() => {
     if (!socket) {
@@ -146,9 +152,31 @@ export default function HostPage() {
       hostingRef.current = true;
     };
 
-    const onDisconnect = () => {
+    const markReplaced = () => {
+      clearRetryTimer();
+      resumeTriesRef.current = 0;
+      replacedRef.current = true;
+      setReplaced(true);
+      reclaimingRef.current = false;
+      setReclaiming(false);
+      hostingRef.current = false;
+      setNotice(null);
+      setLobby(null);
+    };
+
+    const onHostReplaced = () => {
+      markReplaced();
+    };
+
+    const onDisconnect = (reason: string) => {
       clearRetryTimer();
       setCreating(false);
+
+      if (replacedRef.current || reason === "io server disconnect") {
+        markReplaced();
+        return;
+      }
+
       if (lobbyRef.current && readHostSession()) {
         reclaimingRef.current = true;
         setReclaiming(true);
@@ -174,6 +202,8 @@ export default function HostPage() {
       reclaimingRef.current = false;
       setReclaiming(false);
       setNotice(null);
+      replacedRef.current = false;
+      setReplaced(false);
       setLobby({ pin: state.pin, players: state.players });
     };
 
@@ -185,6 +215,8 @@ export default function HostPage() {
       hostingRef.current = false;
       reclaimingRef.current = false;
       setReclaiming(false);
+      replacedRef.current = false;
+      setReplaced(false);
       setLobby(null);
     };
 
@@ -228,6 +260,7 @@ export default function HostPage() {
     socket.on("host:ready", onHostReady);
     socket.on("lobby:update", onLobbyUpdate);
     socket.on("host:error", onHostError);
+    socket.on("host:replaced", onHostReplaced);
 
     return () => {
       clearRetryTimer();
@@ -235,12 +268,17 @@ export default function HostPage() {
       socket.off("host:ready", onHostReady);
       socket.off("lobby:update", onLobbyUpdate);
       socket.off("host:error", onHostError);
+      socket.off("host:replaced", onHostReplaced);
     };
   }, [socket]);
 
   useEffect(() => {
     if (!socket || !connected) {
       resumeAttemptRef.current = null;
+      return;
+    }
+
+    if (replacedRef.current) {
       return;
     }
 
@@ -266,6 +304,36 @@ export default function HostPage() {
     socket.emit("host:resume", session);
   }, [connected, socket]);
 
+  const takeBack = useCallback(() => {
+    const session = readHostSession();
+    if (!session) {
+      setNotice("No saved room session found.");
+      setReplaced(false);
+      replacedRef.current = false;
+      return;
+    }
+
+    setReplaced(false);
+    replacedRef.current = false;
+    setNotice(null);
+    hostingRef.current = true;
+    reclaimingRef.current = true;
+    setReclaiming(true);
+    resumeTriesRef.current = 0;
+    resumeAttemptRef.current = null;
+
+    if (!socket) {
+      return;
+    }
+
+    if (socket.connected) {
+      resumeAttemptRef.current = `${session.pin}:${session.token}`;
+      socket.emit("host:resume", session);
+    } else {
+      socket.connect();
+    }
+  }, [socket]);
+
   const createRoom = useCallback(() => {
     if (!socket || !socket.connected) {
       return;
@@ -284,7 +352,34 @@ export default function HostPage() {
         <p className="text-sm font-medium text-muted">Host</p>
       </header>
 
-      {lobby ? (
+      {replaced ? (
+        <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
+          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+            Room open in another tab
+          </h1>
+          <p className="mt-4 max-w-md text-lg text-pretty text-foreground">
+            This room is now open in another tab.
+          </p>
+          <button
+            type="button"
+            onClick={takeBack}
+            className="mt-8 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-6 text-base font-semibold text-white hover:bg-accent-hover sm:w-auto"
+          >
+            Take it back here
+          </button>
+          {notice ? (
+            <p role="alert" className="mt-4 max-w-md text-sm font-medium text-red-800">
+              {notice}
+            </p>
+          ) : null}
+          <Link
+            href="/"
+            className="mt-8 text-sm font-medium text-foreground underline decoration-line underline-offset-4"
+          >
+            Join a game
+          </Link>
+        </div>
+      ) : lobby ? (
         <div className="flex flex-1 flex-col">
           <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
             <p className="text-sm font-semibold tracking-[0.22em] text-muted uppercase">
