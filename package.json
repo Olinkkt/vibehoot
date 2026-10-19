@@ -8,7 +8,7 @@
     "start": "cross-env NODE_ENV=production tsx server.ts",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "tsx --test src/server/rooms.test.ts src/server/socket.test.ts src/server/rate-limit.test.ts src/server/origin.test.ts"
+    "test": "tsx --test src/server/rooms.test.ts src/server/socket.test.ts src/server/rate-limit.test.ts src/server/origin.test.ts src/server/startup-log.test.ts"
   },
   "dependencies": {
     "lucide-react": "^1.59.0",

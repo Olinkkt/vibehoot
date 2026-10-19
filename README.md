@@ -39,7 +39,7 @@ Room rules are covered by `npm test`. `npm run lint` checks the source, and `npm
 
 `PORT` (default `3000`) is the HTTP port.
 
-`HOST` sets the bind address. Leave it unset to listen on every interface, which is what you want when players join from phones on the same network. The startup log then lists those LAN addresses next to `http://localhost:<port>`. Set `HOST=127.0.0.1` to accept connections from this machine only.
+`HOST` sets the bind address. Leave it unset to listen on every interface, which is what you want when players join from phones on the same network. The startup log then lists those LAN addresses next to `http://localhost:<port>`. `HOST=0.0.0.0` and `HOST=::` listen on every interface too; the log still shows `http://localhost:<port>` and the LAN addresses, not `http://0.0.0.0:<port>`. Set `HOST=127.0.0.1` to accept connections from this machine only.
 
 `HOST_CREATE_COOLDOWN_MS` (default `1000`) is the minimum time between room creates on one connection. `HOST_CREATE_MAX_PER_IP` (default `20`) is how many rooms one client address can have open. The cap uses the socket's remote address. When every PIN is already taken, the host gets an error instead of staying on "Creating room…".
 
