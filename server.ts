@@ -29,8 +29,27 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
 attachGameServer(io);
 
 io.engine.on("connection_error", (error: unknown) => {
-  console.error("Socket.io connection error", error);
+  console.error(connectionErrorLine(error));
 });
+
+const MAX_CONNECTION_ERROR_MESSAGE = 300;
+
+function connectionErrorLine(error: unknown): string {
+  let code = "unknown";
+  let message = "unknown";
+  if (typeof error === "object" && error !== null) {
+    const record = error as { code?: unknown; message?: unknown };
+    if (typeof record.code === "number" || typeof record.code === "string") {
+      code = String(record.code);
+    }
+    if (typeof record.message === "string" && record.message.trim().length > 0) {
+      message = record.message;
+    }
+  }
+
+  const oneLine = message.replaceAll(/[\r\n]+/g, " ").slice(0, MAX_CONNECTION_ERROR_MESSAGE);
+  return `Socket.io connection error code=${code} message=${oneLine}`;
+}
 
 async function handleRequest(
   request: IncomingMessage,
