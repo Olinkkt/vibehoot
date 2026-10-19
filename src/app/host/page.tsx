@@ -4,7 +4,7 @@ import { Play, Users } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSocket } from "@/lib/socket";
-import type { LobbyPlayer, LobbyUpdate } from "@/shared/events";
+import type { HostErrorPayload, LobbyPlayer, LobbyUpdate } from "@/shared/events";
 
 type LobbyState = {
   pin: string;
@@ -69,12 +69,22 @@ export default function HostPage() {
       setLobby({ pin: state.pin, players: state.players });
     };
 
+    const onHostError = (error: HostErrorPayload) => {
+      setCreating(false);
+      setNotice(error.message);
+      if (!lobbyRef.current) {
+        hostingRef.current = false;
+      }
+    };
+
     socket.on("disconnect", onDisconnect);
     socket.on("lobby:update", onLobbyUpdate);
+    socket.on("host:error", onHostError);
 
     return () => {
       socket.off("disconnect", onDisconnect);
       socket.off("lobby:update", onLobbyUpdate);
+      socket.off("host:error", onHostError);
     };
   }, [socket]);
 

@@ -32,3 +32,7 @@ npm start
 - `src/app/host/page.tsx` — host lobby
 
 Room rules are covered by `npm test`.
+
+## Configuration
+
+`HOST_CREATE_COOLDOWN_MS` (default `1000`) is the minimum time between room creates on one connection. `HOST_CREATE_MAX_PER_IP` (default `20`) is how many rooms one client address can have open. The cap uses the socket's remote address. When every PIN is already taken, the host gets an error instead of staying on "Creating room…".

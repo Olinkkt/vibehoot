@@ -24,10 +24,27 @@ describe("room store", () => {
     assert.equal(store.getRoom("0007")?.hostSocketId, "host-1");
   });
 
-  it("throws when every PIN attempt is taken", () => {
+  it("scans for a free PIN when random draws collide", () => {
     const store = createRoomStore({ randomPin: () => 1 });
-    store.createRoom("host-1");
-    assert.throws(() => store.createRoom("host-2"), /No free room PIN/);
+    const first = store.createRoom("host-1");
+    const second = store.createRoom("host-2");
+
+    assert.equal(first.room.pin, "0001");
+    assert.equal(second.room.pin, "0000");
+  });
+
+  it("throws when no PIN remains and keeps the caller's current room", () => {
+    let next = 0;
+    const store = createRoomStore({ randomPin: () => next++ });
+    store.createRoom("host-keep");
+
+    for (let index = 1; index < 10_000; index += 1) {
+      store.createRoom(`host-${index.toString()}`);
+    }
+
+    assert.throws(() => store.createRoom("host-keep"), /No free room PIN/);
+    assert.equal(store.getRoom("0000")?.hostSocketId, "host-keep");
+    assert.equal(store.getRoom("9999")?.hostSocketId, "host-9999");
   });
 
   it("replaces the previous room when the same host creates again", () => {

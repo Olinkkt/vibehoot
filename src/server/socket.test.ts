@@ -3,8 +3,15 @@ import { createServer } from "node:http";
 import { after, describe, it } from "node:test";
 import { Server } from "socket.io";
 import { io as ioClient, type Socket } from "socket.io-client";
-import type { ClientToServerEvents, LobbyUpdate, ServerToClientEvents } from "../shared/events";
-import { createRoomStore } from "./rooms";
+import type {
+  ClientToServerEvents,
+  HostErrorPayload,
+  LobbyUpdate,
+  ServerToClientEvents,
+} from "../shared/events";
+import { HOST_ERRORS, JOIN_ERRORS } from "../shared/validation";
+import { createCreateLimiter, type CreateLimiter } from "./rate-limit";
+import { NO_FREE_PIN_MESSAGE, createRoomStore, type RoomStore } from "./rooms";
 import { attachGameServer } from "./socket";
 
 type TestClient = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -55,12 +62,13 @@ function connect(port: number): Promise<TestClient> {
 }
 
 async function withServer(
-  store: ReturnType<typeof createRoomStore>,
+  store: RoomStore,
   run: (port: number, io: GameServer) => Promise<void>,
+  limiter?: CreateLimiter,
 ): Promise<void> {
   const httpServer = createServer();
   const io: GameServer = new Server(httpServer);
-  attachGameServer(io, store);
+  attachGameServer(io, store, limiter);
   await new Promise<void>((resolve) => {
     httpServer.listen(0, "127.0.0.1", () => {
       resolve();
@@ -130,5 +138,64 @@ describe("game socket", () => {
       assert.equal(io.sockets.sockets.get(hostA.id)?.rooms.has("room:1111"), false);
       assert.equal(store.join("1111", "Late", "player-late").ok, false);
     });
+  });
+
+  it("emits host:error when no PIN is free", { timeout: 5000 }, async () => {
+    const store: RoomStore = {
+      createRoom() {
+        throw new Error(NO_FREE_PIN_MESSAGE);
+      },
+      join() {
+        return { ok: false, message: JOIN_ERRORS.invalidRequest };
+      },
+      disconnect() {
+        return { type: "none" };
+      },
+      getRoom() {
+        return null;
+      },
+    };
+
+    await withServer(store, async (port) => {
+      const host = await connect(port);
+      openClients.push(host);
+      const error = waitFor<HostErrorPayload>(host, "host:error");
+      host.emit("host:create");
+      assert.equal((await error).message, HOST_ERRORS.noRooms);
+    });
+  });
+
+  it("rate-limits host:create per socket and per address", { timeout: 5000 }, async () => {
+    let now = 5_000;
+    const limiter = createCreateLimiter({
+      cooldownMs: 1_000,
+      maxPerIp: 1,
+      now: () => now,
+    });
+    const store = createRoomStore({ randomPin: pins(4444, 5555) });
+
+    await withServer(
+      store,
+      async (port) => {
+        const first = await connect(port);
+        const second = await connect(port);
+        openClients.push(first, second);
+
+        const created = waitFor<LobbyUpdate>(first, "lobby:update");
+        first.emit("host:create");
+        assert.equal((await created).pin, "4444");
+
+        const cooled = waitFor<HostErrorPayload>(first, "host:error");
+        first.emit("host:create");
+        assert.equal((await cooled).message, HOST_ERRORS.tooFast);
+        assert.equal(store.getRoom("4444")?.hostSocketId, first.id);
+
+        const capped = waitFor<HostErrorPayload>(second, "host:error");
+        second.emit("host:create");
+        assert.equal((await capped).message, HOST_ERRORS.tooMany);
+        assert.equal(store.getRoom("5555"), null);
+      },
+      limiter,
+    );
   });
 });

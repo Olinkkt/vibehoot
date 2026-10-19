@@ -5,8 +5,15 @@ import type {
   PlayerJoinPayload,
   ServerToClientEvents,
 } from "../shared/events";
-import { JOIN_ERRORS } from "../shared/validation";
-import { createRoomStore, type DisconnectResult, type Room, type RoomStore } from "./rooms";
+import { HOST_ERRORS, JOIN_ERRORS } from "../shared/validation";
+import { createCreateLimiter, type CreateLimiter } from "./rate-limit";
+import {
+  NO_FREE_PIN_MESSAGE,
+  createRoomStore,
+  type DisconnectResult,
+  type Room,
+  type RoomStore,
+} from "./rooms";
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -51,13 +58,38 @@ function announceDisplacement(
   }
 }
 
-export function attachGameServer(io: GameServer, store: RoomStore = rooms): void {
+function clientAddress(socket: GameSocket): string {
+  const address = socket.handshake.address.trim();
+  return address.length > 0 ? address : "unknown";
+}
+
+export function attachGameServer(
+  io: GameServer,
+  store: RoomStore = rooms,
+  limiter: CreateLimiter = createCreateLimiter(),
+): void {
   io.on("connection", (socket) => {
     socket.on("host:create", () => {
-      const { room, displaced } = store.createRoom(socket.id);
-      announceDisplacement(io, socket, displaced);
-      void socket.join(channel(room.pin));
-      socket.emit("lobby:update", toLobby(room));
+      const decision = limiter.tryAcquire(socket.id, clientAddress(socket));
+      if (!decision.ok) {
+        socket.emit("host:error", { message: decision.message });
+        return;
+      }
+
+      try {
+        const { room, displaced } = store.createRoom(socket.id);
+        announceDisplacement(io, socket, displaced);
+        void socket.join(channel(room.pin));
+        socket.emit("lobby:update", toLobby(room));
+      } catch (error: unknown) {
+        if (decision.reserved) {
+          limiter.release(socket.id);
+        }
+        if (!(error instanceof Error) || error.message !== NO_FREE_PIN_MESSAGE) {
+          console.error("Failed to create room", error);
+        }
+        socket.emit("host:error", { message: HOST_ERRORS.noRooms });
+      }
     });
 
     socket.on("player:join", (payload: PlayerJoinPayload) => {
@@ -73,6 +105,7 @@ export function attachGameServer(io: GameServer, store: RoomStore = rooms): void
       }
 
       if (result.closedPin) {
+        limiter.release(socket.id);
         const closedChannel = channel(result.closedPin);
         socket.to(closedChannel).emit("room:closed");
         io.in(closedChannel).socketsLeave(closedChannel);
@@ -91,6 +124,7 @@ export function attachGameServer(io: GameServer, store: RoomStore = rooms): void
 
     socket.on("disconnect", () => {
       const result = store.disconnect(socket.id);
+      limiter.release(socket.id);
       if (result.type === "room_closed") {
         io.to(channel(result.pin)).emit("room:closed");
         return;

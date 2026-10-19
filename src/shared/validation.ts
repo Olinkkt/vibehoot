@@ -9,6 +9,12 @@ export const JOIN_ERRORS = {
   invalidRequest: "Invalid join request.",
 } as const;
 
+export const HOST_ERRORS = {
+  noRooms: "No rooms available, try again later.",
+  tooFast: "Please wait a moment before creating another room.",
+  tooMany: "Too many rooms from this network. Try again later.",
+} as const;
+
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/g;
 const PIN_PATTERN = /^\d{4}$/;
 

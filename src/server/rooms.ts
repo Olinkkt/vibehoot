@@ -44,6 +44,9 @@ type Membership =
   | { role: "player"; pin: string };
 
 const PIN_ATTEMPTS = 50;
+const PIN_SPACE = 10_000;
+
+export const NO_FREE_PIN_MESSAGE = "No free room PIN is available.";
 
 export type RoomStore = {
   createRoom: (hostSocketId: string) => { room: Room; displaced: DisconnectResult };
@@ -120,22 +123,31 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     return { type: "player_left", room };
   }
 
-  function createRoom(hostSocketId: string): { room: Room; displaced: DisconnectResult } {
-    const displaced = disconnect(hostSocketId);
-    let pin: string | null = null;
-
+  function allocatePin(): string | null {
     for (let attempt = 0; attempt < PIN_ATTEMPTS; attempt += 1) {
       const candidate = String(randomPin()).padStart(PIN_LENGTH, "0");
       if (candidate.length === PIN_LENGTH && !rooms.has(candidate)) {
-        pin = candidate;
-        break;
+        return candidate;
       }
     }
 
-    if (!pin) {
-      throw new Error("No free room PIN is available.");
+    for (let value = 0; value < PIN_SPACE; value += 1) {
+      const candidate = String(value).padStart(PIN_LENGTH, "0");
+      if (!rooms.has(candidate)) {
+        return candidate;
+      }
     }
 
+    return null;
+  }
+
+  function createRoom(hostSocketId: string): { room: Room; displaced: DisconnectResult } {
+    const pin = allocatePin();
+    if (!pin) {
+      throw new Error(NO_FREE_PIN_MESSAGE);
+    }
+
+    const displaced = disconnect(hostSocketId);
     const room: Room = { pin, hostSocketId, players: [] };
     rooms.set(pin, room);
     membership.set(hostSocketId, { role: "host", pin });
