@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoomStore } from "./rooms";
 import {
+  HOST_ERRORS,
   JOIN_ERRORS,
   NICKNAME_DRAFT_CAP,
   NICKNAME_MAX_LENGTH,
@@ -243,6 +244,7 @@ describe("room store", () => {
     const resumed = store.resumeHost("4242", created.token, "host-2");
     assert.equal(resumed.ok, true);
     if (resumed.ok) {
+      assert.equal(resumed.replacedSocketId, null);
       assert.equal(resumed.room.pin, "4242");
       assert.equal(resumed.room.hostSocketId, "host-2");
       assert.deepEqual(
@@ -255,6 +257,39 @@ describe("room store", () => {
     assert.equal(store.expireHost("4242").type, "none");
     assert.equal(store.disconnect("host").type, "none");
     assert.equal(store.getRoom("4242")?.hostSocketId, "host-2");
+  });
+
+  it("replaces a still-connected host when the token matches", () => {
+    const store = createRoomStore({ randomPin: () => 6363 });
+    const created = store.createRoom("host");
+    store.join("6363", "Ada", "p1");
+
+    const wrong = store.resumeHost("6363", "0".repeat(32), "host-2");
+    assert.deepEqual(wrong, { ok: false, message: HOST_ERRORS.roomGone, code: "invalid" });
+    assert.equal(store.getRoom("6363")?.hostSocketId, "host");
+
+    const resumed = store.resumeHost("6363", created.token, "host-2");
+    assert.equal(resumed.ok, true);
+    if (resumed.ok) {
+      assert.equal(resumed.replacedSocketId, "host");
+      assert.equal(resumed.room.hostSocketId, "host-2");
+      assert.deepEqual(
+        resumed.room.players.map((player) => player.nickname),
+        ["Ada"],
+      );
+    }
+
+    assert.equal(store.suspendHost("host").type, "none");
+    assert.equal(store.disconnect("host").type, "none");
+    assert.equal(store.isHostAway("6363"), false);
+    assert.equal(store.getRoom("6363")?.hostSocketId, "host-2");
+
+    const again = store.resumeHost("6363", created.token, "host-2");
+    assert.equal(again.ok, true);
+    if (again.ok) {
+      assert.equal(again.replacedSocketId, null);
+    }
+    assert.equal(store.getRoom("6363")?.hostSocketId, "host-2");
   });
 
   it("deletes the room when the host grace period expires", () => {

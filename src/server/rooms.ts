@@ -1,4 +1,5 @@
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import type { HostErrorCode } from "../shared/events";
 import {
   HOST_ERRORS,
   JOIN_ERRORS,
@@ -42,8 +43,8 @@ export type DisconnectResult =
   | { type: "host_away"; pin: string; reservationSocketId: string };
 
 export type ResumeResult =
-  | { ok: true; room: Room; token: string }
-  | { ok: false; message: string };
+  | { ok: true; room: Room; token: string; replacedSocketId: string | null }
+  | { ok: false; message: string; code: HostErrorCode };
 
 type Membership =
   | { role: "host"; pin: string }
@@ -66,6 +67,7 @@ export type RoomStore = {
   suspendHost: (socketId: string) => DisconnectResult;
   resumeHost: (pin: string, token: string, socketId: string) => ResumeResult;
   expireHost: (pin: string) => DisconnectResult;
+  isHostAway: (pin: string) => boolean;
   getRoom: (pin: string) => Room | null;
 };
 
@@ -149,17 +151,17 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
       return { type: "player_left", room };
     }
 
-    if (!immediate) {
-      const room = rooms.get(current.pin);
-      if (!room) {
-        membership.delete(socketId);
-        return { type: "none" };
-      }
-
-      room.hostAway = true;
-      room.hostSocketId = "";
+    const hosted = rooms.get(current.pin);
+    if (!hosted || hosted.hostSocketId !== socketId) {
       membership.delete(socketId);
-      return { type: "host_away", pin: room.pin, reservationSocketId: socketId };
+      return { type: "none" };
+    }
+
+    if (!immediate) {
+      hosted.hostAway = true;
+      hosted.hostSocketId = "";
+      membership.delete(socketId);
+      return { type: "host_away", pin: hosted.pin, reservationSocketId: socketId };
     }
 
     deleteRoom(current.pin);
@@ -169,18 +171,37 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
   function resumeHost(pinInput: string, token: string, socketId: string): ResumeResult {
     const pin = normalizePin(pinInput);
     const room = pin ? rooms.get(pin) : undefined;
-    if (!pin || !room || !room.hostAway || !tokensMatch(room.hostToken, token)) {
-      return { ok: false, message: HOST_ERRORS.roomGone };
+    if (!pin || !room) {
+      return { ok: false, message: HOST_ERRORS.roomGone, code: "expired" };
     }
 
-    if (membership.has(socketId)) {
-      return { ok: false, message: HOST_ERRORS.roomGone };
+    if (!tokensMatch(room.hostToken, token)) {
+      return { ok: false, message: HOST_ERRORS.roomGone, code: "invalid" };
+    }
+
+    const current = membership.get(socketId);
+    if (current?.role === "host" && current.pin === room.pin) {
+      return { ok: true, room: snapshot(room), token: room.hostToken, replacedSocketId: null };
+    }
+
+    if (current) {
+      return { ok: false, message: HOST_ERRORS.roomGone, code: "invalid" };
+    }
+
+    let replacedSocketId: string | null = null;
+    if (!room.hostAway && room.hostSocketId.length > 0 && room.hostSocketId !== socketId) {
+      replacedSocketId = room.hostSocketId;
+      membership.delete(replacedSocketId);
     }
 
     room.hostAway = false;
     room.hostSocketId = socketId;
     membership.set(socketId, { role: "host", pin: room.pin });
-    return { ok: true, room: snapshot(room), token: room.hostToken };
+    return { ok: true, room: snapshot(room), token: room.hostToken, replacedSocketId };
+  }
+
+  function isHostAway(pin: string): boolean {
+    return rooms.get(pin)?.hostAway ?? false;
   }
 
   function expireHost(pin: string): DisconnectResult {
@@ -289,5 +310,5 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     return room ? snapshot(room) : null;
   }
 
-  return { createRoom, join, disconnect, suspendHost, resumeHost, expireHost, getRoom };
+  return { createRoom, join, disconnect, suspendHost, resumeHost, expireHost, isHostAway, getRoom };
 }

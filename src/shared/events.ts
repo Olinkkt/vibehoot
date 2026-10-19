@@ -11,8 +11,11 @@ export type JoinErrorPayload = {
   message: string;
 };
 
+export type HostErrorCode = "expired" | "invalid" | "transient";
+
 export type HostErrorPayload = {
   message: string;
+  code?: HostErrorCode;
 };
 
 export type PlayerJoinPayload = {
@@ -42,4 +45,6 @@ export interface ServerToClientEvents {
   "host:error": (error: HostErrorPayload) => void;
   "host:ready": (payload: HostReadyPayload) => void;
   "room:closed": () => void;
+  "lobby:hostReconnecting": () => void;
+  "lobby:hostReconnected": () => void;
 }

@@ -14,7 +14,7 @@ npm run dev
 - Host: [http://localhost:3000/host](http://localhost:3000/host)
 - Players: [http://localhost:3000](http://localhost:3000)
 
-Reloading the host page asks for confirmation. If the host reloads anyway, or the connection drops, the room stays open for 12 seconds. The host page keeps a host token in `sessionStorage` and, on reconnect, reclaims the same PIN and player list. Players see "The room was closed" only if the host does not come back in that time.
+Reloading the host page asks for confirmation. If the host reloads anyway, or the connection drops, the room stays open for 12 seconds. Players see "Host is reconnecting…" until the host is back. The host page keeps a host token in `sessionStorage` and, on reconnect, reclaims the same PIN and player list, including when the previous socket is still marked connected. Players see "The room was closed" only if the host does not come back in that time.
 
 ## Production
 
@@ -50,3 +50,5 @@ Room rules are covered by `npm test`. `npm run lint` checks the source, and `npm
 ## Dependency audit
 
 `npm audit` reports [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) on upstream `braces` (a transitive ESLint dependency, dev-only). It only expands glob patterns from this repo's own ESLint config, so the advisory is accepted. Do not run `npm audit fix --force` to clear it: that downgrades `eslint-config-next`.
+
+ESLint itself is on 10.x. `eslint-config-next@16.4.2` still pulls `eslint-plugin-import`, `eslint-plugin-jsx-a11y`, and `eslint-plugin-react`, whose published peer ranges stop at ESLint 9. Those plugins run under ESLint 10. `.npmrc` sets `legacy-peer-deps=true` so `npm ci` does not warn about that range or install the unsupported ESLint 9 release.

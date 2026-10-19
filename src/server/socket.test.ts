@@ -166,10 +166,13 @@ describe("game socket", () => {
         return { type: "none" };
       },
       resumeHost() {
-        return { ok: false, message: HOST_ERRORS.roomGone };
+        return { ok: false, message: HOST_ERRORS.roomGone, code: "expired" };
       },
       expireHost() {
         return { type: "none" };
+      },
+      isHostAway() {
+        return false;
       },
       getRoom() {
         return null;
@@ -271,22 +274,35 @@ describe("game socket", () => {
           closed = true;
         });
 
+        const hostAway = waitFor<undefined>(player, "lobby:hostReconnecting");
         host.disconnect();
+        await hostAway;
         await new Promise((resolve) => setTimeout(resolve, 30));
         assert.equal(closed, false);
+        assert.equal(store.isHostAway("4242"), true);
         assert.equal(store.getRoom("4242")?.players[0]?.nickname, "Ada");
+
+        const latePlayer = await connect(port);
+        openClients.push(latePlayer);
+        const lateAway = waitFor<undefined>(latePlayer, "lobby:hostReconnecting");
+        const lateJoined = waitFor<LobbyUpdate>(latePlayer, "lobby:update");
+        latePlayer.emit("player:join", { pin: "4242", nickname: "Bea" });
+        await lateJoined;
+        await lateAway;
 
         const nextHost = await connect(port);
         openClients.push(nextHost);
+        const hostBack = waitFor<undefined>(player, "lobby:hostReconnected");
         const resumedReady = waitFor<HostReadyPayload>(nextHost, "host:ready");
         const resumedLobby = waitFor<LobbyUpdate>(nextHost, "lobby:update");
         nextHost.emit("host:resume", { pin: credentials.pin, token: credentials.token });
+        await hostBack;
         assert.equal((await resumedReady).token, credentials.token);
         const lobby = await resumedLobby;
         assert.equal(lobby.pin, "4242");
         assert.deepEqual(
           lobby.players.map((entry) => entry.nickname),
-          ["Ada"],
+          ["Ada", "Bea"],
         );
         assert.equal(store.getRoom("4242")?.hostSocketId, socketId(nextHost));
 
@@ -326,7 +342,9 @@ describe("game socket", () => {
         openClients.push(late);
         const error = waitFor<HostErrorPayload>(late, "host:error");
         late.emit("host:resume", { pin: "5150", token: "ab".repeat(16) });
-        assert.equal((await error).message, HOST_ERRORS.roomGone);
+        const lateError = await error;
+        assert.equal(lateError.message, HOST_ERRORS.roomGone);
+        assert.equal(lateError.code, "expired");
       },
       undefined,
       { graceMs: 40 },
@@ -358,12 +376,80 @@ describe("game socket", () => {
         openClients.push(nextHost);
         const error = waitFor<HostErrorPayload>(nextHost, "host:error");
         nextHost.emit("host:resume", { pin: credentials.pin, token: "cd".repeat(16) });
-        assert.equal((await error).message, HOST_ERRORS.roomGone);
+        const rejected = await error;
+        assert.equal(rejected.message, HOST_ERRORS.roomGone);
+        assert.equal(rejected.code, "invalid");
         assert.equal(store.getRoom("6161")?.players[0]?.nickname, "Ada");
         assert.equal(store.getRoom("6161")?.hostSocketId, "");
       },
       undefined,
       { graceMs: 5_000 },
+    );
+  });
+
+  it("lets a new socket take over while the old host socket is still connected", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: () => 7373 });
+    const limiter = createCreateLimiter({ cooldownMs: 0, maxPerIp: 1, now: () => 0 });
+
+    await withServer(
+      store,
+      async (port) => {
+        const host = await connect(port);
+        const player = await connect(port);
+        openClients.push(host, player);
+
+        const ready = waitFor<HostReadyPayload>(host, "host:ready");
+        const created = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        const credentials = await ready;
+        await created;
+
+        const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+        player.emit("player:join", { pin: "7373", nickname: "Ada" });
+        await joined;
+
+        let closed = false;
+        let away = false;
+        player.on("room:closed", () => {
+          closed = true;
+        });
+        player.on("lobby:hostReconnecting", () => {
+          away = true;
+        });
+
+        const nextHost = await connect(port);
+        openClients.push(nextHost);
+        const oldGone = new Promise<void>((resolve) => {
+          host.once("disconnect", () => {
+            resolve();
+          });
+        });
+        const resumedReady = waitFor<HostReadyPayload>(nextHost, "host:ready");
+        const resumedLobby = waitFor<LobbyUpdate>(nextHost, "lobby:update");
+        nextHost.emit("host:resume", { pin: credentials.pin, token: credentials.token });
+        assert.equal((await resumedReady).token, credentials.token);
+        assert.deepEqual(
+          (await resumedLobby).players.map((entry) => entry.nickname),
+          ["Ada"],
+        );
+        await oldGone;
+        assert.equal(host.connected, false);
+        assert.equal(store.getRoom("7373")?.hostSocketId, socketId(nextHost));
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        assert.equal(closed, false);
+        assert.equal(away, false);
+        assert.equal(store.getRoom("7373")?.players[0]?.nickname, "Ada");
+
+        const third = await connect(port);
+        openClients.push(third);
+        const capped = waitFor<HostErrorPayload>(third, "host:error");
+        third.emit("host:create");
+        assert.equal((await capped).message, HOST_ERRORS.tooMany);
+        assert.equal(store.getRoom("7373")?.hostSocketId, socketId(nextHost));
+      },
+      limiter,
+      { graceMs: 80 },
     );
   });
 

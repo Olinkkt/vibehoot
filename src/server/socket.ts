@@ -170,22 +170,32 @@ export function attachGameServer(
 
     socket.on("host:resume", (payload: HostResumePayload) => {
       if (!isResumePayload(payload)) {
-        socket.emit("host:error", { message: HOST_ERRORS.roomGone });
+        socket.emit("host:error", { message: HOST_ERRORS.roomGone, code: "invalid" });
         return;
       }
 
       const result = store.resumeHost(payload.pin, payload.token, socket.id);
       if (!result.ok) {
-        socket.emit("host:error", { message: result.message });
+        socket.emit("host:error", { message: result.message, code: result.code });
         return;
       }
 
+      const roomChannel = channel(result.room.pin);
+      if (result.replacedSocketId) {
+        limiter.reassign(result.replacedSocketId, socket.id);
+        const previous = io.sockets.sockets.get(result.replacedSocketId);
+        if (previous && previous.id !== socket.id) {
+          previous.disconnect(true);
+        }
+      }
+
       const reservationSocketId = clearGrace(result.room.pin);
-      if (reservationSocketId) {
+      if (reservationSocketId && reservationSocketId !== socket.id) {
         limiter.reassign(reservationSocketId, socket.id);
       }
 
-      void socket.join(channel(result.room.pin));
+      io.to(roomChannel).emit("lobby:hostReconnected");
+      void socket.join(roomChannel);
       socket.emit("host:ready", { pin: result.room.pin, token: result.token });
       socket.emit("lobby:update", toLobby(result.room));
     });
@@ -217,6 +227,9 @@ export function attachGameServer(
       const roomChannel = channel(result.room.pin);
       void socket.join(roomChannel);
       io.to(roomChannel).emit("lobby:update", toLobby(result.room));
+      if (store.isHostAway(result.room.pin)) {
+        socket.emit("lobby:hostReconnecting");
+      }
     });
 
     socket.on("disconnect", () => {
@@ -224,6 +237,7 @@ export function attachGameServer(
       if (result.type === "host_away") {
         limiter.clearCooldown(socket.id);
         armGrace(result.pin, result.reservationSocketId);
+        io.to(channel(result.pin)).emit("lobby:hostReconnecting");
         return;
       }
 

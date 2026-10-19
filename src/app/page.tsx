@@ -53,6 +53,7 @@ export default function JoinPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [joining, setJoining] = useState(false);
   const [joinedName, setJoinedName] = useState("");
+  const [hostReconnecting, setHostReconnecting] = useState(false);
   const joinedPinRef = useRef<string | null>(null);
   const pinInputRef = useRef<HTMLInputElement>(null);
   const [pinFocusKey, setPinFocusKey] = useState(0);
@@ -76,18 +77,32 @@ export default function JoinPage() {
 
   const onJoinError = useEffectEvent((error: JoinErrorPayload) => {
     setJoining(false);
+    setHostReconnecting(false);
     setPhase("form");
     setErrors(errorsForMessage(error.message));
   });
 
   const onRoomClosed = useEffectEvent(() => {
     joinedPinRef.current = null;
+    setHostReconnecting(false);
     setJoining(false);
     setPhase("closed");
   });
 
+  const onHostReconnecting = useEffectEvent(() => {
+    if (phase === "closed") {
+      return;
+    }
+    setHostReconnecting(true);
+  });
+
+  const onHostReconnected = useEffectEvent(() => {
+    setHostReconnecting(false);
+  });
+
   const onDisconnect = useEffectEvent(() => {
     setJoining(false);
+    setHostReconnecting(false);
     if (phase === "waiting") {
       joinedPinRef.current = null;
       setErrors({ form: "You were disconnected. Join again." });
@@ -112,17 +127,27 @@ export default function JoinPage() {
     const handleDisconnect = () => {
       onDisconnect();
     };
+    const handleHostReconnecting = () => {
+      onHostReconnecting();
+    };
+    const handleHostReconnected = () => {
+      onHostReconnected();
+    };
 
     socket.on("lobby:update", handleLobbyUpdate);
     socket.on("join:error", handleJoinError);
     socket.on("room:closed", handleRoomClosed);
     socket.on("disconnect", handleDisconnect);
+    socket.on("lobby:hostReconnecting", handleHostReconnecting);
+    socket.on("lobby:hostReconnected", handleHostReconnected);
 
     return () => {
       socket.off("lobby:update", handleLobbyUpdate);
       socket.off("join:error", handleJoinError);
       socket.off("room:closed", handleRoomClosed);
       socket.off("disconnect", handleDisconnect);
+      socket.off("lobby:hostReconnecting", handleHostReconnecting);
+      socket.off("lobby:hostReconnected", handleHostReconnected);
     };
   }, [socket]);
 
@@ -161,6 +186,7 @@ export default function JoinPage() {
 
   const joinAnother = useCallback(() => {
     joinedPinRef.current = null;
+    setHostReconnecting(false);
     setPin("");
     setPhase("form");
     setJoining(false);
@@ -195,6 +221,11 @@ export default function JoinPage() {
           <p role="status" className="mt-4 text-lg">
             Waiting for the host…
           </p>
+          {hostReconnecting ? (
+            <p role="status" className="mt-2 text-sm text-muted">
+              Host is reconnecting…
+            </p>
+          ) : null}
           <p className="mt-6 text-sm text-muted">
             Joined as <span className="font-semibold text-foreground">{joinedName}</span>
           </p>
