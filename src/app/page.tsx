@@ -53,6 +53,8 @@ export default function JoinPage() {
   const [joining, setJoining] = useState(false);
   const [joinedName, setJoinedName] = useState("");
   const joinedPinRef = useRef<string | null>(null);
+  const pinInputRef = useRef<HTMLInputElement>(null);
+  const [pinFocusKey, setPinFocusKey] = useState(0);
 
   const onLobbyUpdate = useEffectEvent((state: LobbyUpdate) => {
     if (phase === "closed" || (joinedPinRef.current !== null && state.pin !== joinedPinRef.current)) {
@@ -158,10 +160,19 @@ export default function JoinPage() {
 
   const joinAnother = useCallback(() => {
     joinedPinRef.current = null;
+    setPin("");
     setPhase("form");
     setJoining(false);
     setErrors({});
+    setPinFocusKey((key) => key + 1);
   }, []);
+
+  useEffect(() => {
+    if (pinFocusKey === 0) {
+      return;
+    }
+    pinInputRef.current?.focus();
+  }, [pinFocusKey]);
 
   const nicknameCount = nicknameLength(normalizeNickname(nickname));
   const nicknameDescribedBy = [
@@ -215,6 +226,7 @@ export default function JoinPage() {
                 PIN
               </label>
               <input
+                ref={pinInputRef}
                 id="pin"
                 name="pin"
                 value={pin}
