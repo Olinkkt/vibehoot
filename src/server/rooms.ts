@@ -23,6 +23,8 @@ export type JoinSuccess = {
   ok: true;
   room: Room;
   previousRoom: Room | null;
+  /** Set when this socket was hosting another room that had to be closed. */
+  closedPin: string | null;
 };
 
 export type JoinFailure = {
@@ -174,7 +176,11 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
     }
 
     let previousRoom: Room | null = null;
-    if (current?.role === "player" && current.pin !== room.pin) {
+    let closedPin: string | null = null;
+    if (current?.role === "host" && current.pin !== room.pin) {
+      closedPin = current.pin;
+      deleteRoom(current.pin);
+    } else if (current?.role === "player" && current.pin !== room.pin) {
       previousRoom = removePlayer(current.pin, socketId);
     }
 
@@ -188,7 +194,7 @@ export function createRoomStore(options: RoomStoreOptions = {}): RoomStore {
       membership.set(socketId, { role: "player", pin: room.pin });
     }
 
-    return { ok: true, room: snapshot(room), previousRoom };
+    return { ok: true, room: snapshot(room), previousRoom, closedPin };
   }
 
   function getRoom(pin: string): Room | null {

@@ -109,4 +109,46 @@ describe("room store", () => {
     assert.equal(store.getRoom("0077"), null);
     assert.deepEqual(store.disconnect("p2"), { type: "none" });
   });
+
+  it("closes the hosted room when that host joins another room as a player", () => {
+    const store = createRoomStore({ randomPin: pins(1111, 2222) });
+    store.createRoom("host-a");
+    store.join("1111", "Quinn", "player-q");
+    store.createRoom("host-b");
+
+    const rejected = store.join("2222", "   ", "host-a");
+    assert.equal(rejected.ok, false);
+    assert.equal(store.getRoom("1111")?.hostSocketId, "host-a");
+
+    const joined = store.join("2222", "H2AsPlayer", "host-a");
+    assert.equal(joined.ok, true);
+    if (joined.ok) {
+      assert.equal(joined.closedPin, "1111");
+      assert.deepEqual(
+        joined.room.players.map((player) => player.nickname),
+        ["H2AsPlayer"],
+      );
+    }
+
+    assert.equal(store.getRoom("1111"), null);
+    assert.equal(store.join("1111", "Late", "player-late").ok, false);
+    assert.deepEqual(store.disconnect("player-q"), { type: "none" });
+    assert.deepEqual(store.disconnect("host-a"), {
+      type: "player_left",
+      room: store.getRoom("2222"),
+    });
+  });
+
+  it("rejects a host joining their own room and keeps them as host", () => {
+    const store = createRoomStore({ randomPin: () => 3333 });
+    store.createRoom("host-a");
+    store.join("3333", "Quinn", "player-q");
+
+    assert.deepEqual(store.join("3333", "Host", "host-a"), {
+      ok: false,
+      message: JOIN_ERRORS.invalidRequest,
+    });
+    assert.equal(store.getRoom("3333")?.hostSocketId, "host-a");
+    assert.deepEqual(store.disconnect("host-a"), { type: "room_closed", pin: "3333" });
+  });
 });

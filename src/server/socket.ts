@@ -6,7 +6,7 @@ import type {
   ServerToClientEvents,
 } from "../shared/events";
 import { JOIN_ERRORS } from "../shared/validation";
-import { createRoomStore, type DisconnectResult, type Room } from "./rooms";
+import { createRoomStore, type DisconnectResult, type Room, type RoomStore } from "./rooms";
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -51,10 +51,10 @@ function announceDisplacement(
   }
 }
 
-export function attachGameServer(io: GameServer): void {
+export function attachGameServer(io: GameServer, store: RoomStore = rooms): void {
   io.on("connection", (socket) => {
     socket.on("host:create", () => {
-      const { room, displaced } = rooms.createRoom(socket.id);
+      const { room, displaced } = store.createRoom(socket.id);
       announceDisplacement(io, socket, displaced);
       void socket.join(channel(room.pin));
       socket.emit("lobby:update", toLobby(room));
@@ -66,10 +66,16 @@ export function attachGameServer(io: GameServer): void {
         return;
       }
 
-      const result = rooms.join(payload.pin, payload.nickname, socket.id);
+      const result = store.join(payload.pin, payload.nickname, socket.id);
       if (!result.ok) {
         socket.emit("join:error", { message: result.message });
         return;
+      }
+
+      if (result.closedPin) {
+        const closedChannel = channel(result.closedPin);
+        socket.to(closedChannel).emit("room:closed");
+        io.in(closedChannel).socketsLeave(closedChannel);
       }
 
       if (result.previousRoom) {
@@ -84,7 +90,7 @@ export function attachGameServer(io: GameServer): void {
     });
 
     socket.on("disconnect", () => {
-      const result = rooms.disconnect(socket.id);
+      const result = store.disconnect(socket.id);
       if (result.type === "room_closed") {
         io.to(channel(result.pin)).emit("room:closed");
         return;
