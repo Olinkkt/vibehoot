@@ -1,1 +1,34 @@
-# vibehoot
+# Slophoot
+
+Self-hosted Kahoot-style quiz. This milestone is the lobby: a host creates a room, players join with a PIN and nickname, and the host sees the list update live. Starting the game is not implemented yet. Room state lives in memory and is cleared when the server restarts.
+
+## Run in development
+
+```bash
+npm install
+npm run dev
+```
+
+`npm run dev` runs `tsx watch server.ts`, which serves Next.js and Socket.io on the same HTTP server.
+
+- Host: [http://localhost:3000/host](http://localhost:3000/host)
+- Players: [http://localhost:3000](http://localhost:3000)
+
+## Production
+
+```bash
+npm run build
+npm start
+```
+
+## Folder structure
+
+- `server.ts` — HTTP server, Next.js request handler, and Socket.io
+- `src/server/rooms.ts` — in-memory rooms, PIN generation, and join rules
+- `src/server/socket.ts` — host, player, and disconnect events
+- `src/shared/events.ts` — shared Socket.io event types
+- `src/lib/socket.ts` — typed Socket.io client hook
+- `src/app/page.tsx` — player join page
+- `src/app/host/page.tsx` — host lobby
+
+Room rules are covered by `npm test`.
