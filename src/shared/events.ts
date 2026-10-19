@@ -36,6 +36,7 @@ export type HostResumePayload = {
 export interface ClientToServerEvents {
   "host:create": () => void;
   "host:resume": (payload: HostResumePayload) => void;
+  "host:leaving": () => void;
   "player:join": (payload: PlayerJoinPayload) => void;
 }
 

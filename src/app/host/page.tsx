@@ -102,6 +102,7 @@ export default function HostPage() {
   const [replaced, setReplaced] = useState(false);
   const [lobby, setLobby] = useState<LobbyState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pinCopied, setPinCopied] = useState(false);
   const lobbyRef = useRef<LobbyState | null>(null);
   const hostingRef = useRef(false);
   const reclaimingRef = useRef(false);
@@ -109,6 +110,7 @@ export default function HostPage() {
   const resumeAttemptRef = useRef<string | null>(null);
   const resumeTriesRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     lobbyRef.current = lobby;
@@ -134,6 +136,25 @@ export default function HostPage() {
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, [lobby, replaced]);
+
+  useEffect(() => {
+    if (!socket || !lobby || replaced) {
+      return;
+    }
+
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted || replacedRef.current || !lobbyRef.current || !socket.connected) {
+        return;
+      }
+
+      socket.emit("host:leaving");
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [lobby, replaced, socket]);
 
   useEffect(() => {
     if (!socket) {
@@ -334,6 +355,36 @@ export default function HostPage() {
     }
   }, [socket]);
 
+  const copyPin = useCallback(() => {
+    if (!lobby || !navigator.clipboard?.writeText) {
+      return;
+    }
+
+    void navigator.clipboard.writeText(lobby.pin).then(
+      () => {
+        setPinCopied(true);
+        if (copyTimerRef.current !== null) {
+          clearTimeout(copyTimerRef.current);
+        }
+        copyTimerRef.current = setTimeout(() => {
+          copyTimerRef.current = null;
+          setPinCopied(false);
+        }, 2000);
+      },
+      () => {
+        setPinCopied(false);
+      },
+    );
+  }, [lobby]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
   const createRoom = useCallback(() => {
     if (!socket || !socket.connected) {
       return;
@@ -382,9 +433,21 @@ export default function HostPage() {
       ) : lobby ? (
         <div className="flex flex-1 flex-col">
           <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-            <p className="text-sm font-semibold tracking-[0.22em] text-muted uppercase">
-              Game PIN
-            </p>
+            <div className="flex items-center justify-center gap-3">
+              <p className="text-sm font-semibold tracking-[0.22em] text-muted uppercase">
+                Game PIN
+              </p>
+              <button
+                type="button"
+                onClick={copyPin}
+                className="inline-flex min-h-11 items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold text-foreground hover:bg-zinc-100"
+              >
+                {pinCopied ? "Copied" : "Copy PIN"}
+              </button>
+              <span role="status" className="sr-only">
+                {pinCopied ? "Copied" : ""}
+              </span>
+            </div>
             <PinDigits pin={lobby.pin} />
             <p className="mt-4 max-w-md text-lg text-pretty text-foreground">
               Players enter this PIN to join.

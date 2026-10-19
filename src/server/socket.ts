@@ -109,6 +109,16 @@ export function attachGameServer(
     return pending.reservationSocketId;
   }
 
+  function graceHolds(socketId: string): boolean {
+    for (const pending of graceTimers.values()) {
+      if (pending.reservationSocketId === socketId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function armGrace(pin: string, reservationSocketId: string): void {
     clearGrace(pin);
     const timer = setTimeout(() => {
@@ -127,6 +137,12 @@ export function attachGameServer(
     }, graceMs);
     timer.unref();
     graceTimers.set(pin, { timer, reservationSocketId });
+  }
+
+  function beginHostGrace(pin: string, reservationSocketId: string): void {
+    limiter.clearCooldown(reservationSocketId);
+    armGrace(pin, reservationSocketId);
+    io.to(channel(pin)).emit("lobby:hostReconnecting");
   }
 
   io.engine.on("close", () => {
@@ -195,7 +211,10 @@ export function attachGameServer(
         limiter.reassign(reservationSocketId, socket.id);
       }
 
-      io.to(roomChannel).emit("lobby:hostReconnected");
+      if (reservationSocketId) {
+        io.to(roomChannel).emit("lobby:hostReconnected");
+      }
+
       void socket.join(roomChannel);
       socket.emit("host:ready", { pin: result.room.pin, token: result.token });
       socket.emit("lobby:update", toLobby(result.room));
@@ -233,16 +252,26 @@ export function attachGameServer(
       }
     });
 
-    socket.on("disconnect", () => {
-      const result = store.suspendHost(socket.id);
-      if (result.type === "host_away") {
-        limiter.clearCooldown(socket.id);
-        armGrace(result.pin, result.reservationSocketId);
-        io.to(channel(result.pin)).emit("lobby:hostReconnecting");
+    socket.on("host:leaving", () => {
+      const result = store.leaveHost(socket.id);
+      if (result.type !== "host_away") {
         return;
       }
 
-      limiter.forget(socket.id);
+      void socket.leave(channel(result.pin));
+      beginHostGrace(result.pin, result.reservationSocketId);
+    });
+
+    socket.on("disconnect", () => {
+      const result = store.suspendHost(socket.id);
+      if (result.type === "host_away") {
+        beginHostGrace(result.pin, result.reservationSocketId);
+        return;
+      }
+
+      if (!graceHolds(socket.id)) {
+        limiter.forget(socket.id);
+      }
       if (result.type === "room_closed") {
         closeChannel(io, result.pin);
         return;

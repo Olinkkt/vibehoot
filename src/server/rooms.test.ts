@@ -292,6 +292,25 @@ describe("room store", () => {
     assert.equal(store.getRoom("6363")?.hostSocketId, "host-2");
   });
 
+  it("marks only the current host away when they leave", () => {
+    const store = createRoomStore({ randomPin: () => 8181 });
+    store.createRoom("host");
+    store.join("8181", "Ada", "p1");
+
+    assert.equal(store.leaveHost("p1").type, "none");
+    assert.equal(store.getRoom("8181")?.hostSocketId, "host");
+    assert.equal(store.getRoom("8181")?.players[0]?.nickname, "Ada");
+
+    assert.deepEqual(store.leaveHost("host"), {
+      type: "host_away",
+      pin: "8181",
+      reservationSocketId: "host",
+    });
+    assert.equal(store.isHostAway("8181"), true);
+    assert.equal(store.leaveHost("host").type, "none");
+    assert.equal(store.getRoom("8181")?.players[0]?.nickname, "Ada");
+  });
+
   it("deletes the room when the host grace period expires", () => {
     const store = createRoomStore({ randomPin: () => 5150 });
     store.createRoom("host");

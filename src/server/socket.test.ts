@@ -165,6 +165,9 @@ describe("game socket", () => {
       suspendHost() {
         return { type: "none" };
       },
+      leaveHost() {
+        return { type: "none" };
+      },
       resumeHost() {
         return { ok: false, message: HOST_ERRORS.roomGone, code: "expired" };
       },
@@ -387,6 +390,91 @@ describe("game socket", () => {
     );
   });
 
+  it("starts grace on host:leaving without closing the room, then allows resume", { timeout: 5000 }, async () => {
+    const store = createRoomStore({ randomPin: () => 9090 });
+    const limiter = createCreateLimiter({ cooldownMs: 0, maxPerIp: 1, now: () => 0 });
+
+    await withServer(
+      store,
+      async (port) => {
+        const host = await connect(port);
+        const player = await connect(port);
+        openClients.push(host, player);
+
+        const ready = waitFor<HostReadyPayload>(host, "host:ready");
+        const created = waitFor<LobbyUpdate>(host, "lobby:update");
+        host.emit("host:create");
+        const credentials = await ready;
+        await created;
+
+        const joined = waitFor<LobbyUpdate>(player, "lobby:update");
+        player.emit("player:join", { pin: "9090", nickname: "Ada" });
+        await joined;
+
+        let awayCount = 0;
+        let backCount = 0;
+        let closed = false;
+        player.on("lobby:hostReconnecting", () => {
+          awayCount += 1;
+        });
+        player.on("lobby:hostReconnected", () => {
+          backCount += 1;
+        });
+        player.on("room:closed", () => {
+          closed = true;
+        });
+
+        const away = waitFor<undefined>(player, "lobby:hostReconnecting");
+        player.emit("host:leaving");
+        host.emit("host:leaving");
+        host.emit("host:leaving");
+        await away;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal(awayCount, 1);
+        assert.equal(backCount, 0);
+        assert.equal(closed, false);
+        assert.equal(store.isHostAway("9090"), true);
+        assert.equal(store.getRoom("9090")?.players[0]?.nickname, "Ada");
+        assert.equal(host.connected, true);
+
+        host.disconnect();
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal(awayCount, 1);
+        assert.equal(closed, false);
+        assert.equal(store.getRoom("9090")?.hostSocketId, "");
+
+        const other = await connect(port);
+        openClients.push(other);
+        const capped = waitFor<HostErrorPayload>(other, "host:error");
+        other.emit("host:create");
+        assert.equal((await capped).message, HOST_ERRORS.tooMany);
+
+        const nextHost = await connect(port);
+        openClients.push(nextHost);
+        const back = waitFor<undefined>(player, "lobby:hostReconnected");
+        const resumed = waitFor<HostReadyPayload>(nextHost, "host:ready");
+        nextHost.emit("host:resume", { pin: credentials.pin, token: credentials.token });
+        await back;
+        assert.equal((await resumed).token, credentials.token);
+        assert.equal(backCount, 1);
+        assert.equal(store.getRoom("9090")?.hostSocketId, socketId(nextHost));
+
+        let repeated = 0;
+        player.on("lobby:hostReconnected", () => {
+          repeated += 1;
+        });
+        const again = waitFor<HostReadyPayload>(nextHost, "host:ready");
+        nextHost.emit("host:resume", { pin: credentials.pin, token: credentials.token });
+        assert.equal((await again).pin, "9090");
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal(repeated, 0);
+        assert.equal(closed, false);
+      },
+      limiter,
+      { graceMs: 5_000 },
+    );
+  });
+
   it("lets a new socket take over while the old host socket is still connected", { timeout: 5000 }, async () => {
     const store = createRoomStore({ randomPin: () => 7373 });
     const limiter = createCreateLimiter({ cooldownMs: 0, maxPerIp: 1, now: () => 0 });
@@ -410,11 +498,15 @@ describe("game socket", () => {
 
         let closed = false;
         let away = false;
+        let reconnected = false;
         player.on("room:closed", () => {
           closed = true;
         });
         player.on("lobby:hostReconnecting", () => {
           away = true;
+        });
+        player.on("lobby:hostReconnected", () => {
+          reconnected = true;
         });
 
         const nextHost = await connect(port);
@@ -473,6 +565,7 @@ describe("game socket", () => {
         assert.equal(store.getRoom("7373")?.hostSocketId, socketId(takeBackHost));
         assert.equal(closed, false);
         assert.equal(away, false);
+        assert.equal(reconnected, false);
 
         const third = await connect(port);
         openClients.push(third);
