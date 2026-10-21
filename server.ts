@@ -61,6 +61,15 @@ function requestHost(request: IncomingMessage): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function isHealthCheckRequest(request: IncomingMessage): boolean {
+  if (request.method !== "GET") {
+    return false;
+  }
+
+  const path = (request.url ?? "").split("?", 1)[0] ?? "";
+  return path === "/api/health" || path === "/api/health/";
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -72,7 +81,9 @@ async function handleRequest(
   applySecurityHeaders(response);
 
   try {
-    if (!isAllowedHost(requestHost(request))) {
+    // Coolify curls localhost from inside the container. That host is not the
+    // public ALLOWED_HOSTS entry, so the probe must still reach the route.
+    if (!isHealthCheckRequest(request) && !isAllowedHost(requestHost(request))) {
       response.statusCode = 403;
       response.setHeader("content-type", "text/plain; charset=utf-8");
       response.end("forbidden");
