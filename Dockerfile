@@ -31,8 +31,9 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Run as non-root user
-RUN addgroup --system --gid 1001 nodejs && \
+# Coolify probes from inside the container with curl or wget.
+RUN apk add --no-cache curl && \
+    addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
 # Copy runtime assets and dependencies

@@ -60,9 +60,11 @@ Navigate to the **Environment Variables** tab in your application and set the fo
 ### Step 4: Health Check (Optional)
 
 In Coolify's **Health Check** section:
-- **Path**: `/`
+- **Path**: `/api/health`
 - **Port**: `3000`
 - **Expected Status**: `200`
+
+`GET /api/health` returns `{"ok":true,"uptime":<seconds>}` with no authentication and no database access. It stays available when `ALLOWED_HOSTS` is the public domain, because Coolify calls `http://localhost:3000/api/health` from inside the container.
 
 ### Step 5: Deploy
 
