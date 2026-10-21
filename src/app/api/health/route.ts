@@ -1,6 +1,10 @@
-export const dynamic = "force-dynamic";
+import { connection } from "next/server";
 
-export function GET(): Response {
+// `cacheComponents` rejects `dynamic = "force-dynamic"`. `connection()` is the
+// per-request opt-out, so uptime is not frozen during prerender.
+export async function GET(): Promise<Response> {
+  await connection();
+
   return Response.json(
     { ok: true, uptime: Math.floor(process.uptime()) },
     {
