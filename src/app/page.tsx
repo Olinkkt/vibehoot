@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent } from "react";
+import { GoldButton, Logo, Stage } from "@/components/stage";
 import { useSocket } from "@/lib/socket";
 import type { JoinErrorPayload, LobbyUpdate } from "@/shared/events";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/shared/validation";
 
 type Phase = "form" | "waiting" | "closed";
+type FormStep = "pin" | "nickname";
 
 type FieldErrors = {
   pin?: string;
@@ -23,9 +25,6 @@ type FieldErrors = {
 };
 
 const PIN_FORMAT_ERROR = "Enter a 4-digit PIN.";
-
-const fieldClassName =
-  "mt-2 min-h-14 w-full rounded-lg border border-line bg-surface px-3 text-base text-foreground";
 
 function errorsForMessage(message: string): FieldErrors {
   if (message === JOIN_ERRORS.unknownPin) {
@@ -48,14 +47,17 @@ export default function JoinPage() {
   const socket = connection?.socket ?? null;
   const connected = connection?.connected ?? false;
   const [phase, setPhase] = useState<Phase>("form");
+  const [formStep, setFormStep] = useState<FormStep>("pin");
   const [pin, setPin] = useState("");
   const [nickname, setNickname] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [joining, setJoining] = useState(false);
   const [joinedName, setJoinedName] = useState("");
+  const [joinedPin, setJoinedPin] = useState("");
   const [hostReconnecting, setHostReconnecting] = useState(false);
   const joinedPinRef = useRef<string | null>(null);
   const pinInputRef = useRef<HTMLInputElement>(null);
+  const nicknameInputRef = useRef<HTMLInputElement>(null);
   const [pinFocusKey, setPinFocusKey] = useState(0);
 
   const onLobbyUpdate = useEffectEvent((state: LobbyUpdate) => {
@@ -70,6 +72,7 @@ export default function JoinPage() {
     }
 
     setJoinedName(normalized);
+    setJoinedPin(state.pin);
     setJoining(false);
     setErrors({});
     setPhase("waiting");
@@ -79,7 +82,9 @@ export default function JoinPage() {
     setJoining(false);
     setHostReconnecting(false);
     setPhase("form");
-    setErrors(errorsForMessage(error.message));
+    const nextErrors = errorsForMessage(error.message);
+    setErrors(nextErrors);
+    setFormStep(nextErrors.pin ? "pin" : "nickname");
   });
 
   const onRoomClosed = useEffectEvent(() => {
@@ -106,6 +111,7 @@ export default function JoinPage() {
     if (phase === "waiting") {
       joinedPinRef.current = null;
       setErrors({ form: "You were disconnected. Join again." });
+      setFormStep("pin");
       setPhase("form");
     }
   });
@@ -160,6 +166,18 @@ export default function JoinPage() {
     };
   }, [socket]);
 
+  const submitPin = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedPin = normalizePin(pin);
+    if (!normalizedPin) {
+      setErrors({ pin: PIN_FORMAT_ERROR });
+      return;
+    }
+
+    setErrors({});
+    setFormStep("nickname");
+  }, [pin]);
+
   const joinGame = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -182,7 +200,11 @@ export default function JoinPage() {
       }
 
       setErrors(nextErrors);
-      if (!normalizedPin || nextErrors.nickname) {
+      if (!normalizedPin) {
+        setFormStep("pin");
+        return;
+      }
+      if (nextErrors.nickname) {
         return;
       }
 
@@ -197,6 +219,7 @@ export default function JoinPage() {
     joinedPinRef.current = null;
     setHostReconnecting(false);
     setPin("");
+    setFormStep("pin");
     setPhase("form");
     setJoining(false);
     setErrors({});
@@ -210,151 +233,167 @@ export default function JoinPage() {
     pinInputRef.current?.focus();
   }, [pinFocusKey]);
 
+  useEffect(() => {
+    if (phase === "form" && formStep === "nickname") {
+      nicknameInputRef.current?.focus();
+    }
+  }, [formStep, phase]);
+
   const nicknameCount = nicknameLength(normalizeNickname(nickname));
   const nicknameOverLimit = nicknameCount > NICKNAME_MAX_LENGTH;
   const nicknameError = nicknameOverLimit ? JOIN_ERRORS.nicknameTooLong : errors.nickname;
-  const nicknameDescribedBy = [
-    "nickname-count",
-    nicknameError ? "nickname-error" : null,
-  ]
+  const nicknameDescribedBy = ["nickname-count", nicknameError ? "nickname-error" : null]
     .filter((id): id is string => id !== null)
     .join(" ");
 
-  return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-4 py-8">
-      <p className="text-xl font-semibold tracking-tight sm:text-3xl">Slophoot</p>
-
-      {phase === "waiting" ? (
-        <div className="mt-10">
-          <h1 className="text-4xl font-semibold tracking-tight text-balance">{"You're in!"}</h1>
-          <p role="status" className="mt-4 text-lg">
-            Waiting for the host…
-          </p>
-          {hostReconnecting ? (
-            <p role="status" className="mt-2 text-sm text-muted">
-              Host is reconnecting…
+  if (phase === "waiting") {
+    return (
+      <Stage variant="lobby">
+        <div className="relative z-1 flex min-h-dvh flex-col">
+          <header className="sh-topbar">
+            <p className="sh-player-pin">
+              PIN: <b>{joinedPin || pin}</b>
             </p>
-          ) : null}
-          <p className="mt-6 text-sm text-muted">
-            Joined as <span className="font-semibold text-foreground">{joinedName}</span>
-          </p>
+            <Logo className="sh-logo-player" />
+          </header>
+          <main className="sh-player-main">
+            <h1 className="sh-in-title">You’re in!</h1>
+            <p className="sh-in-sub">See your nickname on screen?</p>
+            <p role="status" className="sh-in-wait">
+              {hostReconnecting ? "Host is reconnecting…" : "Waiting for the host to start…"}
+            </p>
+          </main>
+          <footer className="sh-bottombar">
+            <p className="sh-player-nick">{joinedName}</p>
+            <div className="sh-score" aria-label="Score 0">
+              0
+            </div>
+          </footer>
         </div>
-      ) : null}
+      </Stage>
+    );
+  }
 
-      {phase === "closed" ? (
-        <div className="mt-10">
-          <h1 className="text-4xl font-semibold tracking-tight text-balance">The room was closed</h1>
-          <button
-            type="button"
-            onClick={joinAnother}
-            className="mt-8 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-5 text-base font-semibold text-white hover:bg-accent-hover"
-          >
-            Join another game
-          </button>
-        </div>
-      ) : null}
+  return (
+    <Stage variant="join">
+      <main className="relative z-1 mx-auto flex min-h-dvh w-full flex-col items-center justify-center px-4 py-8">
+        <Logo className="sh-logo-join" priority />
 
-      {phase === "form" ? (
-        <>
-          <h1 className="mt-10 text-4xl font-semibold tracking-tight text-balance">Join a game</h1>
-          <form onSubmit={joinGame} noValidate className="mt-8 flex flex-col gap-5">
+        {phase === "closed" ? (
+          <div className="sh-card">
+            <h1 className="sh-card-label">The room was closed</h1>
+            <GoldButton type="button" className="sh-gold-join" onClick={joinAnother}>
+              Join another game
+            </GoldButton>
+          </div>
+        ) : null}
+
+        {phase === "form" && formStep === "pin" ? (
+          <form onSubmit={submitPin} noValidate className="sh-card">
             {errors.form ? (
-              <p role="alert" className="text-sm font-medium text-red-800">
+              <p role="alert" className="sh-error sh-error-lead">
                 {errors.form}
               </p>
             ) : null}
-
-            <div>
-              <label htmlFor="pin" className="text-sm font-semibold">
-                PIN
-              </label>
-              <input
-                ref={pinInputRef}
-                id="pin"
-                name="pin"
-                value={pin}
-                onChange={(event) => {
-                  const nextPin = event.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH);
-                  setPin(nextPin);
-                  setErrors((current) => (current.pin ? { ...current, pin: undefined } : current));
-                }}
-                inputMode="numeric"
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                pattern="[0-9]*"
-                maxLength={PIN_LENGTH}
-                enterKeyHint="next"
-                aria-invalid={errors.pin ? true : undefined}
-                aria-describedby={errors.pin ? "pin-error" : undefined}
-                className={`${fieldClassName} pl-[0.35em] text-center font-scoreboard text-4xl tracking-[0.35em]`}
-              />
-              {errors.pin ? (
-                <p id="pin-error" role="alert" className="mt-2 text-sm font-medium text-red-800">
-                  {errors.pin}
-                </p>
-              ) : null}
-            </div>
-
-            <div>
-              <label htmlFor="nickname" className="text-sm font-semibold">
-                Nickname
-              </label>
-              <input
-                id="nickname"
-                name="nickname"
-                value={nickname}
-                onChange={(event) => {
-                  setNickname(capNicknameDraft(event.target.value));
-                  setErrors((current) =>
-                    current.nickname ? { ...current, nickname: undefined } : current,
-                  );
-                }}
-                autoComplete="nickname"
-                autoCapitalize="words"
-                enterKeyHint="go"
-                aria-invalid={nicknameError ? true : undefined}
-                aria-describedby={nicknameDescribedBy}
-                className={`${fieldClassName}${nicknameOverLimit ? " border-red-800" : ""}`}
-              />
-              <p
-                id="nickname-count"
-                className={`mt-2 text-sm tabular-nums ${nicknameOverLimit ? "font-medium text-red-800" : "text-muted"}`}
-              >
-                {nicknameCount} / {NICKNAME_MAX_LENGTH}
-              </p>
-              {nicknameError ? (
-                <p
-                  id="nickname-error"
-                  role={errors.nickname ? "alert" : undefined}
-                  className="mt-2 text-sm font-medium text-red-800"
-                >
-                  {nicknameError}
-                </p>
-              ) : null}
-            </div>
-
-            <button
-              type="submit"
-              disabled={!connected || joining || nicknameOverLimit}
-              className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-5 text-base font-semibold text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-700"
-            >
-              {joining ? "Joining…" : "Join"}
-            </button>
-            {!connected ? (
-              <p role="status" className="text-sm text-muted">
-                Connecting…
+            <label htmlFor="pin" className="sh-card-label">
+              PIN
+            </label>
+            <input
+              ref={pinInputRef}
+              id="pin"
+              name="pin"
+              value={pin}
+              onChange={(event) => {
+                const nextPin = event.target.value.replace(/\D/g, "").slice(0, PIN_LENGTH);
+                setPin(nextPin);
+                setErrors((current) => (current.pin ? { ...current, pin: undefined } : current));
+              }}
+              placeholder="Enter PIN"
+              inputMode="numeric"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              pattern="[0-9]*"
+              maxLength={PIN_LENGTH}
+              enterKeyHint="next"
+              aria-invalid={errors.pin ? true : undefined}
+              aria-describedby={errors.pin ? "pin-error" : undefined}
+              className="sh-field"
+            />
+            {errors.pin ? (
+              <p id="pin-error" role="alert" className="sh-error">
+                {errors.pin}
               </p>
             ) : null}
+            <GoldButton type="submit" className="sh-gold-join" disabled={!connected}>
+              Join
+            </GoldButton>
           </form>
-          <Link
-            href="/host"
-            className="mt-8 text-sm font-medium text-foreground underline decoration-line underline-offset-4"
-          >
+        ) : null}
+
+        {phase === "form" && formStep === "nickname" ? (
+          <form onSubmit={joinGame} noValidate className="sh-card sh-card-nick">
+            {errors.form ? (
+              <p role="alert" className="sh-error sh-error-lead">
+                {errors.form}
+              </p>
+            ) : null}
+            <label htmlFor="nickname" className="sr-only">
+              Nickname
+            </label>
+            <input
+              ref={nicknameInputRef}
+              id="nickname"
+              name="nickname"
+              value={nickname}
+              onChange={(event) => {
+                setNickname(capNicknameDraft(event.target.value));
+                setErrors((current) =>
+                  current.nickname ? { ...current, nickname: undefined } : current,
+                );
+              }}
+              placeholder="Nickname"
+              autoComplete="nickname"
+              autoCapitalize="words"
+              enterKeyHint="go"
+              aria-invalid={nicknameError ? true : undefined}
+              aria-describedby={nicknameDescribedBy}
+              className="sh-field"
+            />
+            <p id="nickname-count" className="sr-only">
+              {nicknameCount} / {NICKNAME_MAX_LENGTH}
+            </p>
+            {nicknameError ? (
+              <p
+                id="nickname-error"
+                role={errors.nickname ? "alert" : undefined}
+                className="sh-error"
+              >
+                {nicknameError}
+              </p>
+            ) : null}
+            <GoldButton
+              type="submit"
+              className="sh-gold-join"
+              disabled={!connected || joining || nicknameOverLimit}
+            >
+              {joining ? "Joining…" : "Ok, go"}
+            </GoldButton>
+          </form>
+        ) : null}
+
+        {!connected && phase === "form" ? (
+          <p role="status" className="sh-status">
+            Connecting…
+          </p>
+        ) : null}
+
+        {phase === "form" ? (
+          <Link href="/host" className="sh-quiet-link">
             Host a game
           </Link>
-        </>
-      ) : null}
-    </main>
+        ) : null}
+      </main>
+    </Stage>
   );
 }

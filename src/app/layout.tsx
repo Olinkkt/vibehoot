@@ -1,16 +1,12 @@
 import type { Metadata } from "next";
-import { Barlow_Condensed, Geist } from "next/font/google";
+import { Montserrat } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const montserrat = Montserrat({
+  variable: "--font-montserrat",
   subsets: ["latin"],
-});
-
-const scoreboard = Barlow_Condensed({
-  variable: "--font-scoreboard",
-  subsets: ["latin"],
-  weight: "600",
+  weight: ["400", "700", "800", "900"],
+  display: "block",
 });
 
 export const metadata: Metadata = {
@@ -23,10 +19,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${scoreboard.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${montserrat.variable} ${montserrat.className} h-full antialiased`}>
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
   );

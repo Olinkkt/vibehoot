@@ -1,8 +1,8 @@
 "use client";
 
-import { Play, Users } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { GoldButton, Logo, Stage } from "@/components/stage";
 import { useSocket } from "@/lib/socket";
 import type { HostErrorPayload, HostReadyPayload, LobbyPlayer, LobbyUpdate } from "@/shared/events";
 import { HOST_ERRORS } from "@/shared/validation";
@@ -70,27 +70,6 @@ function clearHostSession(): void {
   } catch {
     // Ignore storage failures. The server still decides when the room closes.
   }
-}
-
-function PinDigits({ pin }: { pin: string }) {
-  const digits = pin.split("");
-
-  return (
-    <p
-      className="mt-4 flex justify-center gap-[0.08em] font-scoreboard text-[clamp(5.5rem,18vw,8rem)] leading-none font-semibold text-foreground sm:gap-[0.15em] sm:text-[clamp(7.5rem,14vw,15rem)]"
-      aria-label={`Game PIN ${digits.join(" ")}`}
-    >
-      {digits.map((digit, index) => (
-        <span
-          key={`${pin}-${index.toString()}`}
-          aria-hidden="true"
-          className="inline-block min-w-[0.72em] text-center sm:min-w-[0.9em]"
-        >
-          {digit}
-        </span>
-      ))}
-    </p>
-  );
 }
 
 export default function HostPage() {
@@ -396,144 +375,120 @@ export default function HostPage() {
     socket.emit("host:create");
   }, [socket]);
 
-  return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col px-6 py-8">
-      <header className="flex items-center justify-between">
-        <p className="text-xl font-semibold tracking-tight sm:text-3xl">Slophoot</p>
-        <p className="text-sm font-medium text-muted">Host</p>
-      </header>
-
-      {replaced ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Room open in another tab
-          </h1>
-          <p className="mt-4 max-w-md text-lg text-pretty text-foreground">
-            This room is now open in another tab.
-          </p>
-          <button
-            type="button"
-            onClick={takeBack}
-            className="mt-8 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-6 text-base font-semibold text-white hover:bg-accent-hover sm:w-auto"
-          >
+  if (replaced) {
+    return (
+      <Stage variant="join">
+        <main className="relative z-1 mx-auto flex min-h-dvh w-full flex-col items-center justify-center px-4 py-8 text-center">
+          <Logo className="sh-logo-join" priority />
+          <h1 className="sh-fallback-title">Room open in another tab</h1>
+          <p className="sh-in-sub">This room is now open in another tab.</p>
+          <GoldButton type="button" className="sh-gold-join mt-8 max-w-[450px]" onClick={takeBack}>
             Take it back here
-          </button>
+          </GoldButton>
           {notice ? (
-            <p role="alert" className="mt-4 max-w-md text-sm font-medium text-red-800">
+            <p role="alert" className="sh-notice">
               {notice}
             </p>
           ) : null}
-          <Link
-            href="/"
-            className="mt-8 text-sm font-medium text-foreground underline decoration-line underline-offset-4"
-          >
+          <Link href="/" className="sh-quiet-link">
             Join a game
           </Link>
-        </div>
-      ) : lobby ? (
-        <div className="flex flex-1 flex-col">
-          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
-            <div className="flex items-center justify-center gap-3">
-              <p className="text-sm font-semibold tracking-[0.22em] text-muted uppercase">
-                Game PIN
-              </p>
-              <button
-                type="button"
-                onClick={copyPin}
-                className="inline-flex min-h-11 items-center rounded-lg border border-line bg-surface px-3 text-sm font-semibold text-foreground hover:bg-zinc-100"
-              >
-                {pinCopied ? "Copied" : "Copy PIN"}
-              </button>
-              <span role="status" className="sr-only">
-                {pinCopied ? "Copied" : ""}
-              </span>
-            </div>
-            <PinDigits pin={lobby.pin} />
-            <p className="mt-4 max-w-md text-lg text-pretty text-foreground">
-              Players enter this PIN to join.
-            </p>
-            {reclaiming ? (
-              <p role="status" className="mt-4 text-sm text-muted">
-                Reconnecting…
-              </p>
-            ) : null}
-          </div>
+        </main>
+      </Stage>
+    );
+  }
 
-          <section aria-labelledby="players-heading" className="w-full">
-            <h2 id="players-heading" className="flex items-center gap-2 text-xl font-semibold">
-              <Users aria-hidden="true" className="size-5" strokeWidth={2.25} />
-              Players
-              <span className="tabular-nums text-muted">({lobby.players.length})</span>
-            </h2>
-            {lobby.players.length === 0 ? (
-              <p className="mt-3 border-y border-line py-6 text-lg text-muted">
-                Waiting for players to join.
-              </p>
-            ) : (
-              <ul aria-live="polite" className="mt-3 divide-y divide-line border-y border-line">
-                {lobby.players.map((player) => (
-                  <li key={player.nickname} className="py-3 text-2xl font-medium sm:text-3xl">
-                    {player.nickname}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+  if (lobby) {
+    return (
+      <Stage variant="lobby">
+        <header className="sh-host-band">
+          <button
+            type="button"
+            onClick={copyPin}
+            className="sh-pin-plate"
+            aria-label={`Game PIN ${lobby.pin}. Click to copy.`}
+          >
+            <span className="sh-pin-tag">Game PIN:</span>
+            <span className="sh-pin-value">{lobby.pin}</span>
+          </button>
+          <span role="status" className="sr-only">
+            {pinCopied ? "Copied" : ""}
+          </span>
+        </header>
+        <Logo className="sh-logo-host" priority />
+        <GoldButton
+          type="button"
+          className="sh-gold-start"
+          disabled
+          aria-label="Start game – coming soon"
+          title="Start game – coming soon"
+        >
+          Start
+        </GoldButton>
+        {lobby.players.length === 0 ? (
+          <p role="status" className="sh-wait-pill">
+            {reclaiming ? "Reconnecting…" : "Waiting for players…"}
+          </p>
+        ) : (
+          <ul aria-live="polite" aria-label="Players" className="sh-player-list">
+            {lobby.players.map((player) => (
+              <li key={player.nickname} className="sh-player-chip">
+                {player.nickname}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Stage>
+    );
+  }
 
-          <div className="mt-8 flex flex-col items-center gap-3">
-            <button
-              type="button"
-              disabled
-              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-zinc-200 px-6 text-base font-semibold text-zinc-700 sm:w-auto"
-            >
-              <Play aria-hidden="true" className="size-5" strokeWidth={2.25} />
-              Start game – coming soon
-            </button>
-          </div>
-        </div>
-      ) : reclaiming ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Reconnecting
-          </h1>
-          <p role="status" className="mt-4 max-w-md text-lg text-pretty text-foreground">
+  if (reclaiming) {
+    return (
+      <Stage variant="lobby">
+        <main className="relative z-1 mx-auto flex min-h-dvh w-full flex-col items-center justify-center px-4 py-8 text-center">
+          <Logo className="sh-logo-join" />
+          <h1 className="sh-fallback-title">Reconnecting</h1>
+          <p role="status" className="sh-in-wait">
             Reconnecting to your room…
           </p>
-        </div>
-      ) : (
-        <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Host a game
-          </h1>
-          <p className="mt-4 max-w-md text-lg text-pretty text-foreground">
-            Create a room, then share the PIN. Players join from their phones.
+        </main>
+      </Stage>
+    );
+  }
+
+  return (
+    <Stage variant="join">
+      <main className="relative z-1 mx-auto flex min-h-dvh w-full flex-col items-center justify-center px-4 py-8 text-center">
+        <Logo className="sh-logo-join" priority />
+        <h1 className="sr-only">Host a game</h1>
+        <div className="sh-card">
+          <p className="sh-card-label">Host a game</p>
+          <p className="mb-1 text-center text-base font-bold text-sh-navy">
+            Create a room, then share the PIN.
           </p>
-          <button
+          <GoldButton
             type="button"
+            className="sh-gold-join"
             onClick={createRoom}
             disabled={!connected || creating}
-            className="mt-8 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-accent px-6 text-base font-semibold text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-700 sm:w-auto"
           >
             {creating ? "Creating room…" : "Create room"}
-          </button>
-          {!connected ? (
-            <p role="status" className="mt-4 text-sm text-muted">
-              Connecting…
-            </p>
-          ) : null}
-          {notice ? (
-            <p role="alert" className="mt-4 max-w-md text-sm font-medium text-red-800">
-              {notice}
-            </p>
-          ) : null}
-          <Link
-            href="/"
-            className="mt-8 text-sm font-medium text-foreground underline decoration-line underline-offset-4"
-          >
-            Join a game
-          </Link>
+          </GoldButton>
         </div>
-      )}
-    </main>
+        {!connected ? (
+          <p role="status" className="sh-status">
+            Connecting…
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="alert" className="sh-notice">
+            {notice}
+          </p>
+        ) : null}
+        <Link href="/" className="sh-quiet-link">
+          Join a game
+        </Link>
+      </main>
+    </Stage>
   );
 }
